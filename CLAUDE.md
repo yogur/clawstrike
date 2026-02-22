@@ -23,3 +23,20 @@ The full product specification is in `tasks/clawstrike-prd.md` and user stories 
 - **Testing:** pytest + pytest-asyncio
 - **Lint/format:** ruff
 - **Project layout:** `src/clawstrike/` (src layout)
+
+## Development Commands
+
+```bash
+uv run pytest                # run all tests
+uv run ruff check --fix      # lint
+uv run ruff format           # format (always use this, never manually reformat)
+```
+
+## Codebase Patterns
+
+- **Enum classes:** Use `StrEnum` (Python 3.11+) — ruff UP042 will flag `(str, Enum)` style.
+- **Pydantic models:** Use `ConfigDict(extra="allow")` on all config models so unknown fields land in `model_extra` for warning logic. Use `extra="ignore"` only if warnings are not needed.
+- **Config loading:** `load_config(path)` in `src/clawstrike/config.py` is the single entry point. It returns `ClawStrikeConfig`.
+- **Unknown field warnings:** Implemented via `_collect_extra_paths()` which recursively compares raw YAML dict against model field names using the `_NESTED` registry. When adding new nested config models, add them to `_NESTED`.
+- **`classifier.model` is the only required field** — all others have defaults.
+- **ruff line length:** 88 chars. Use `ruff format` to fix; never manually wrap lines.

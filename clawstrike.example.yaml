@@ -1,0 +1,69 @@
+clawstrike:
+  mode: "skill"  # Only "skill" is supported in the MVP.
+
+  mcp:
+    transport: "stdio"  # stdio is the default for local MCP integrations.
+
+  classifier:
+    # Required. Choose the prompt injection detection model.
+    #   "prompt-guard-2" — Llama Prompt Guard 2 (86M). Multilingual, fine-tunable.
+    #   "deberta-v3"     — protectai/deberta-v3-small (44M). English-only, faster.
+    #   "custom"         — Load your own model from custom_model_path.
+    model: "prompt-guard-2"
+
+    # Required only when model is "custom".
+    # custom_model_path: "/path/to/your/model"
+
+    run_mode: "local"  # "local" (default) runs inference on this machine.
+
+    threshold:
+      block: 0.92  # Scores at or above this → block recommendation.
+      flag: 0.70   # Scores at or above this (and below block) → elevated scrutiny.
+
+  trust:
+    # Base trust level assigned to each input channel type.
+    # Valid levels: high, medium, low, untrusted
+    channel_defaults:
+      owner_dm:      high       # Direct messages from the owner account.
+      trusted_group: medium     # Pre-approved group chats.
+      public_group:  low        # Open/public group channels.
+      email_body:    low        # Content from inbound emails.
+      webhook:       untrusted  # API/webhook-sourced input.
+      skill_input:   untrusted  # Data injected via skill execution.
+
+    # Adjustments applied to block/flag thresholds based on source trust level.
+    # Positive values → more lenient (threshold raised).
+    # Negative values → stricter (threshold lowered).
+    threshold_modifiers:
+      high:      { block: +0.05, flag: +0.10 }
+      medium:    { block:  0.00, flag:  0.00 }
+      low:       { block: -0.05, flag: -0.10 }
+      untrusted: { block: -0.10, flag: -0.20 }
+
+    # Number of safe interactions before an auto-managed contact is promoted
+    # to their channel's default trust level.
+    auto_promote_after: 5
+
+  action_gating:
+    enabled: true
+
+    # Channel used to send approval prompts to the owner.
+    confirmation_channel: "owner_dm"
+
+    # When true, approving a gated action offers an "always allow" option
+    # that creates a persistent allowlist rule.
+    allowlist_learning: true
+
+  audit:
+    enabled: true
+
+    # Events older than this many days are purged on startup.
+    # Set to 0 for infinite retention.
+    retention_days: 90
+
+    # When true, the first raw_input_max_chars characters of each input are
+    # stored in the audit log. Set to false to store only the SHA-256 hash.
+    log_raw_input: true
+    raw_input_max_chars: 200
+
+    db_path: "./data/audit.db"

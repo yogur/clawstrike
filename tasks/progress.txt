@@ -1,0 +1,29 @@
+## Codebase Patterns
+- Use `StrEnum` for all enum classes (Python 3.11+). `ruff` UP042 flags `(str, Enum)` style.
+- All Pydantic config models use `ConfigDict(extra="allow")` so unknown YAML fields land in `model_extra` for warning.
+- When adding new nested config models, register them in `_NESTED` dict in `config.py` so `_collect_extra_paths()` can recurse into them.
+- `classifier.model` is the only required config field — all others have defaults.
+- Always use `uv run ruff format` to format; never manually wrap lines.
+- Quality check commands: `uv run pytest`, `uv run ruff check`, `uv run ruff format`.
+
+---
+
+## 2026-02-22 - US-001
+- Implemented YAML configuration loading (`src/clawstrike/config.py`)
+- Set up the full project scaffold: `pyproject.toml` (hatchling build, src layout), `src/clawstrike/__init__.py`, `tests/__init__.py`
+- Added dependencies via `uv add`: pydantic>=2, pyyaml, structlog; dev: pytest, pytest-asyncio, ruff
+- Files changed:
+  - `pyproject.toml` — added deps, build system, pytest/ruff config
+  - `src/clawstrike/__init__.py` — created (empty)
+  - `src/clawstrike/config.py` — Pydantic v2 config models + `load_config()` loader
+  - `tests/__init__.py` — created (empty)
+  - `tests/test_config.py` — 26 tests covering all US-001 acceptance criteria
+  - `CLAUDE.md` — added dev commands + codebase patterns section
+- All 26 tests pass; `ruff check` and `ruff format` clean
+- **Learnings for future iterations:**
+  - Pydantic v2 `ConfigDict(extra="allow")` stores unknown fields in `model_extra`; use this pattern + a recursive `_collect_extra_paths()` function + a `_NESTED` registry to emit stderr warnings for unknown YAML fields without breaking validation.
+  - `StrEnum` (Python 3.11+) is preferred over `(str, Enum)` — ruff UP042 will flag the latter as an unsafe fix candidate; just use `StrEnum` from the start.
+  - ruff's `--fix` handles import sorting and unused imports safely. `--unsafe-fixes` handles the StrEnum migration — use `StrEnum` from the start to avoid it.
+  - `uv run ruff format` must be used for formatting, never manual line-wrapping.
+  - `_RootConfig` wrapper model (with `clawstrike:` as the only key) is needed to validate the top-level YAML structure before extracting the inner `ClawStrikeConfig`.
+---

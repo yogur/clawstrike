@@ -14,12 +14,12 @@
 **Description:** As a ClawStrike user, I want to define all settings in a single `clawstrike.yaml` file so that I can configure the system without touching code.
 
 **Acceptance Criteria:**
-- [ ] ClawStrike reads configuration from `clawstrike.yaml` in the working directory or a path specified via `--config` CLI flag
-- [ ] Missing required fields (e.g., `classifier.model`) cause a startup error with a message naming the missing field
-- [ ] Unknown fields are ignored with a warning logged to stderr
-- [ ] Default values are applied for all optional fields as specified in the PRD Configuration Reference (Section 7)
-- [ ] Configuration is validated at startup: invalid enum values (e.g., `model: "invalid"`) produce an error naming the field and listing valid options
-- [ ] Phase 1.5 fields (`proxy` block) are parsed and validated even when `mode: "skill"`, so config errors are caught early
+- [x] ClawStrike reads configuration from `clawstrike.yaml` in the working directory or a path specified via `--config` CLI flag
+- [x] Missing required fields (e.g., `classifier.model`) cause a startup error with a message naming the missing field
+- [x] Unknown fields are ignored with a warning logged to stderr
+- [x] Default values are applied for all optional fields as specified in the PRD Configuration Reference (Section 7)
+- [x] Configuration is validated at startup: invalid enum values (e.g., `model: "invalid"`) produce an error naming the field and listing valid options
+- [x] Phase 1.5 fields (`proxy` block) are parsed and validated even when `mode: "skill"`, so config errors are caught early
 
 ---
 
