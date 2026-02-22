@@ -47,3 +47,7 @@ The CLI entry point is `src/clawstrike/cli.py`. It exports `app` (a Typer instan
 - **Unknown field warnings:** Implemented via `_collect_extra_paths()` which recursively compares raw YAML dict against model field names using the `_NESTED` registry. When adding new nested config models, add them to `_NESTED`.
 - **`classifier.model` is the only required field** — all others have defaults.
 - **ruff line length:** 88 chars. Use `ruff format` to fix; never manually wrap lines.
+- **MCP server pattern:** `src/clawstrike/mcpserver.py` holds a module-level `mcp = FastMCP(...)` instance with a `_config: ClawStrikeConfig | None` global. Call `init_server(cfg)` to inject config before the server handles requests. The CLI calls this; tests use an `autouse` fixture that resets `srv._config = None` after each test for isolation.
+- **FastMCP v3 tool decorator:** Use `@mcp.tool` (no parentheses) for simple tools. Tool return types are `dict[str, Any]` for flexible schemas.
+- **FastMCP v3 testing:** Use `result = await mcp.call_tool("tool_name", {...})` for direct in-process testing. Access results via `result.structured_content` (typed dict). `RuntimeError` raised inside tools is wrapped in `fastmcp.exceptions.ToolError` at the protocol boundary — match on `ToolError` in tests, not `RuntimeError`.
+- **fastmcp run support:** Set `CLAWSTRIKE_CONFIG=/path/to/clawstrike.yaml` env var, then run `fastmcp run src/clawstrike/mcpserver.py`. The module auto-initializes via the env var on import.

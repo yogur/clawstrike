@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 from typing import Annotated
 
@@ -46,7 +47,58 @@ def start(
         typer.echo(str(exc), err=True)
         raise typer.Exit(code=1) from exc
 
-    typer.echo(
-        f"Config loaded (mode={cfg.mode}). MCP server startup not yet implemented."
+    if cfg.mode.value != "skill":
+        typer.echo(
+            f"Error: mode '{cfg.mode.value}' is not supported. "
+            "Only 'skill' mode is available in the MVP.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    # Import and configure the module-level MCP server.
+    from clawstrike.mcpserver import init_server, mcp
+
+    init_server(cfg)
+
+    print(
+        "ClawStrike MCP server started "
+        f"(skill mode — advisory, stdio transport, "
+        f"classifier={cfg.classifier.model.value})",
+        file=sys.stderr,
     )
+
+    # Blocks until the client disconnects (stdio transport).
+    mcp.run(transport="stdio")
+
+
+# ---------------------------------------------------------------------------
+# Placeholder commands — implemented in later stories
+# ---------------------------------------------------------------------------
+
+
+@app.command()
+def logs() -> None:
+    """Query the audit log (US-025 – US-028)."""
+    typer.echo("Not yet implemented.", err=True)
+    raise typer.Exit(code=1)
+
+
+@app.command()
+def trust() -> None:
+    """Manually trust a contact (US-014)."""
+    typer.echo("Not yet implemented.", err=True)
+    raise typer.Exit(code=1)
+
+
+@app.command()
+def block() -> None:
+    """Manually block a contact (US-014)."""
+    typer.echo("Not yet implemented.", err=True)
+    raise typer.Exit(code=1)
+
+
+@app.command()
+def allowlist() -> None:
+    """Manage the action allowlist (US-021)."""
+    typer.echo("Not yet implemented.", err=True)
     raise typer.Exit(code=1)

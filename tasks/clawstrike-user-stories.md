@@ -28,12 +28,12 @@
 **Description:** As a ClawStrike user, I want to start ClawStrike as a local MCP server so that the ClawStrike OpenClaw skill can call it for classification and gating recommendations.
 
 **Acceptance Criteria:**
-- [ ] Running `clawstrike start` with `mode: "skill"` starts a fastmcp MCP server using stdio transport
-- [ ] Startup logs confirm the server is running (e.g., `ClawStrike MCP server started (skill mode — advisory, stdio transport)`)
-- [ ] The server exposes a `classify` MCP tool that accepts `text`, `source_id`, and `channel_type` parameters and returns a classification result
-- [ ] The server exposes a `gate` MCP tool that accepts `action_description`, `action_type`, `session_id`, `source_id`, and `channel_type` parameters and returns a gating recommendation
-- [ ] The server exposes a `health` MCP tool that returns `{"status": "ok", "mode": "skill", "classifier": "<model_name>"}`
-- [ ] The MCP server can also be started directly via `fastmcp run` for development/testing
+- [x] Running `clawstrike start` with `mode: "skill"` starts a fastmcp MCP server using stdio transport
+- [x] Startup logs confirm the server is running (e.g., `ClawStrike MCP server started (skill mode — advisory, stdio transport)`)
+- [x] The server exposes a `classify` MCP tool that accepts `text`, `source_id`, and `channel_type` parameters and returns a classification result
+- [x] The server exposes a `gate` MCP tool that accepts `action_description`, `action_type`, `session_id`, `source_id`, and `channel_type` parameters and returns a gating recommendation
+- [x] The server exposes a `health` MCP tool that returns `{"status": "ok", "mode": "skill", "classifier": "<model_name>"}`
+- [x] The MCP server can also be started directly via `fastmcp run` for development/testing
 
 ---
 

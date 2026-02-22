@@ -5,6 +5,9 @@
 - `classifier.model` is the only required config field — all others have defaults.
 - Always use `uv run ruff format` to format; never manually wrap lines.
 - Quality check commands: `uv run pytest`, `uv run ruff check`, `uv run ruff format`.
+- MCP server lives in `src/clawstrike/mcpserver.py` (named for clarity over generic `server.py`). Module-level `mcp = FastMCP(...)` + `_config` global; `init_server(cfg)` injects config at startup.
+- FastMCP v3: `@mcp.tool` decorator (no parentheses). Test tools with `await mcp.call_tool(name, args)`, read result via `result.structured_content`. `RuntimeError` inside tools surfaces as `fastmcp.exceptions.ToolError` — assert `ToolError` in tests.
+- Test isolation for module globals: use an `autouse` fixture that resets the global back to `None` after each test.
 
 ---
 
@@ -26,4 +29,23 @@
   - ruff's `--fix` handles import sorting and unused imports safely. `--unsafe-fixes` handles the StrEnum migration — use `StrEnum` from the start to avoid it.
   - `uv run ruff format` must be used for formatting, never manual line-wrapping.
   - `_RootConfig` wrapper model (with `clawstrike:` as the only key) is needed to validate the top-level YAML structure before extracting the inner `ClawStrikeConfig`.
+---
+
+## 2026-02-22 - US-002
+- Implemented Skill Mode MCP server startup
+- Added `fastmcp>=3.0.1` dependency
+- Files changed:
+  - `pyproject.toml` — added `fastmcp>=3.0.1`
+  - `src/clawstrike/mcpserver.py` — new: module-level `FastMCP("ClawStrike")`, `init_server()`, `health`/`classify`/`gate` tools (stubs; full inference in US-005/006, gating in US-017/018)
+  - `src/clawstrike/cli.py` — `start` command now calls `init_server()`, logs startup banner to stderr, calls `mcp.run(transport="stdio")`
+  - `tests/test_server.py` — 12 tests covering all three tools, uninitialized-server error paths, config injection, tool registration
+  - `CLAUDE.md` — added fastmcp patterns
+  - `tasks/clawstrike-user-stories.md` — marked US-002 complete
+- All 38 tests pass; `ruff check` and `ruff format` clean
+- **Learnings for future iterations:**
+  - FastMCP v3 (3.0.1): `@mcp.tool` (no parentheses). `mcp.run(transport="stdio")` blocks on stdio.
+  - Startup log must go to stderr — stdout is reserved for MCP protocol messages in stdio mode.
+  - `RuntimeError` inside tool handlers is caught and re-raised as `fastmcp.exceptions.ToolError` — tests must match `ToolError`, not `RuntimeError`.
+  - Use a module-level `mcp = FastMCP(...)` (not a factory-only pattern) so `fastmcp run mcpserver.py` can discover the server instance. Use env var `CLAWSTRIKE_CONFIG` for config path when using `fastmcp run`.
+  - Name the MCP server module `mcpserver.py` rather than `server.py` to be unambiguous in a project that may later add an HTTP proxy server.
 ---

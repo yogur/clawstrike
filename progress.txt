@@ -1,0 +1,40 @@
+## Codebase Patterns
+- Use `StrEnum` (Python 3.11+) for all enum classes — ruff UP042 flags `(str, Enum)` style.
+- Pydantic config models: `ConfigDict(extra="allow")` so unknown fields land in `model_extra` for warning logic.
+- `load_config(path)` in `config.py` is the single config entry point; raises `FileNotFoundError` or `ValueError`.
+- MCP server uses a module-level `mcp = FastMCP(...)` + `_config` global; `init_server(cfg)` injects config. Tests use an `autouse` fixture that resets `srv._config = None` for isolation.
+- FastMCP v3 tool decorator: `@mcp.tool` (no parentheses). Test with `await mcp.call_tool(name, args)`, access result via `result.structured_content`.
+- `RuntimeError` inside FastMCP tools is wrapped as `ToolError` at the protocol boundary — assert `ToolError` in tests, not `RuntimeError`.
+- `fastmcp run` support: set `CLAWSTRIKE_CONFIG=<path>` env var; module auto-initializes on import.
+- ruff line length: 88 chars — always use `ruff format`, never manually wrap.
+
+---
+
+## [2026-02-22] - US-002
+
+- What was implemented:
+  - Added `fastmcp>=3.0.1` dependency via `uv add fastmcp`
+  - Created `src/clawstrike/server.py` with module-level `FastMCP("ClawStrike")` instance and three MCP tools:
+    - `health` → returns `{"status": "ok", "mode": "skill", "classifier": "<model>"}`
+    - `classify` → accepts `text`, `source_id`, `channel_type`; returns stub classification result (full inference in US-005/006)
+    - `gate` → accepts `action_description`, `action_type`, `session_id`, `source_id`, `channel_type`; returns stub gating recommendation (full engine in US-017/018)
+  - `init_server(cfg)` injects `ClawStrikeConfig` into the module-level `_config` global; `_require_config()` guards all tool handlers
+  - Auto-initialization via `CLAWSTRIKE_CONFIG` env var for `fastmcp run src/clawstrike/server.py`
+  - Updated `src/clawstrike/cli.py` `start` command: loads config, calls `init_server()`, logs startup banner to stderr, calls `mcp.run(transport="stdio")`
+  - Created `tests/test_server.py` with 12 tests covering all three tools, uninitialized-server error paths, config injection, and tool registration
+- Files changed:
+  - `pyproject.toml` — added `fastmcp>=3.0.1`
+  - `src/clawstrike/server.py` — new file
+  - `src/clawstrike/cli.py` — updated `start` command
+  - `tests/test_server.py` — new file
+  - `CLAUDE.md` — added fastmcp patterns to Codebase Patterns
+  - `tasks/clawstrike-user-stories.md` — marked US-002 complete
+- **Learnings for future iterations:**
+  - FastMCP v3 is already at 3.0.1; the `@mcp.tool` decorator (no parentheses) is the current API.
+  - Direct tool testing: `result = await mcp.call_tool("name", {…})` works in-process without a Client. `result.structured_content` returns the typed dict. `result.data` also available.
+  - `RuntimeError` inside a tool handler is caught and re-raised as `fastmcp.exceptions.ToolError` — tests must match `ToolError`, not `RuntimeError`.
+  - Module-level `mcp = FastMCP(...)` must exist for `fastmcp run server.py` to find the server; don't use a factory-only pattern if you want `fastmcp run` support.
+  - Test isolation for the `_config` global requires an `autouse` fixture that resets it to `None` after each test.
+  - `mcp.run(transport="stdio")` is the correct call; the `transport` kwarg is a string literal.
+  - Startup log must go to stderr (stdout is reserved for MCP protocol messages in stdio mode).
+---
