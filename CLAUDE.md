@@ -32,6 +32,13 @@ uv run ruff check --fix      # lint
 uv run ruff format           # format (always use this, never manually reformat)
 ```
 
+## CLI Structure
+
+The CLI entry point is `src/clawstrike/cli.py`. It exports `app` (a Typer instance), which is registered as the `clawstrike` console script in `pyproject.toml`.
+
+- All commands accept `--config / -c PATH` via the shared `_ConfigOption` alias.
+- Commands call `load_config()` and surface `FileNotFoundError`/`ValueError` to stderr with exit code 1.
+
 ## Codebase Patterns
 
 - **Enum classes:** Use `StrEnum` (Python 3.11+) — ruff UP042 will flag `(str, Enum)` style.
