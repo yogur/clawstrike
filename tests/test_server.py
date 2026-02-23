@@ -37,8 +37,10 @@ def minimal_config(extra: dict | None = None) -> dict:
 
 @pytest.fixture
 def cfg(tmp_path: Path) -> ClawStrikeConfig:
-    """Return a minimal validated config."""
-    return load_config(write_yaml(tmp_path, minimal_config()))
+    """Return a minimal validated config with a per-test isolated DB path."""
+    data = minimal_config()
+    data["clawstrike"]["audit"] = {"db_path": str(tmp_path / "test.db")}
+    return load_config(write_yaml(tmp_path, data))
 
 
 @pytest.fixture(autouse=True)
@@ -65,6 +67,7 @@ def reset_server_config():
     srv._config = None
     srv._classifier = None
     srv._elevated_sessions.clear()
+    srv._db_path = None
 
 
 # ---------------------------------------------------------------------------
@@ -495,8 +498,10 @@ async def test_classify_response_includes_trust_level(
     result = await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
     data = result.structured_content
     assert "trust_level" in data
-    # email_body maps to LOW by default
-    assert data["trust_level"] == "low"
+    # US-012: first contact is always UNTRUSTED regardless of channel.
+    # email_body would normally resolve to LOW, but user@example.com is a new
+    # contact in the fresh per-test DB, so UNTRUSTED override applies.
+    assert data["trust_level"] == "untrusted"
 
 
 @pytest.mark.asyncio
@@ -599,13 +604,28 @@ async def test_classify_high_trust_raises_block_threshold(
     cfg: ClawStrikeConfig, reset_server_config: MagicMock
 ) -> None:
     """Score 0.93 would block at base thresholds (0.92) but only flags at owner_dm
-    HIGH trust (eff_block=0.97, eff_flag=0.80), demonstrating the raised threshold."""
+    HIGH trust (eff_block=0.97, eff_flag=0.80), demonstrating the raised threshold.
+
+    Pre-condition: 'owner' must be a known contact so the US-012 first-contact
+    UNTRUSTED override does not apply. A seed call registers the contact first.
+    """
     import clawstrike.mcpserver as srv
 
+    srv.init_server(cfg)
+
+    # Seed: register 'owner' as a known contact (score=0.0 → pass, no side effects).
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {"text": "hello", "source_id": "owner", "channel_type": "owner_dm"},
+    )
+
+    # Now test threshold modulation on the second (known-contact) call.
     reset_server_config.classify.return_value = ClassifierResult(
         score=0.93, label="benign", model="mock-model", latency_ms=2.0
     )
-    srv.init_server(cfg)
     result = await srv.mcp.call_tool(
         "classify",
         {"text": "t", "source_id": "owner", "channel_type": "owner_dm"},
@@ -615,3 +635,105 @@ async def test_classify_high_trust_raises_block_threshold(
     # but 0.93 ≥ eff_flag=0.80 → flag (not pass)
     assert data["decision"] == "flag"
     assert pytest.approx(data["threshold_applied"]["block"], abs=1e-9) == 0.97
+
+
+# ---------------------------------------------------------------------------
+# US-012 — Contact Registry: First Contact Detection (integration)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_classify_first_contact_is_first_contact_true(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """First classify call for a new source_id returns is_first_contact=True."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+    assert result.structured_content["is_first_contact"] is True
+
+
+@pytest.mark.asyncio
+async def test_classify_known_contact_is_first_contact_false(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Second classify call for the same source_id returns is_first_contact=False."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+    result = await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+    assert result.structured_content["is_first_contact"] is False
+
+
+@pytest.mark.asyncio
+async def test_classify_first_contact_trust_level_is_untrusted(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """First contact trust_level is UNTRUSTED even for a high-trust channel."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "classify",
+        {"text": "hi", "source_id": "new-owner", "channel_type": "owner_dm"},
+    )
+    # owner_dm is normally HIGH, but first contact overrides to UNTRUSTED.
+    assert result.structured_content["trust_level"] == "untrusted"
+
+
+@pytest.mark.asyncio
+async def test_classify_known_contact_uses_channel_trust_level(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Second call for the same source_id resolves trust from channel defaults."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    # Seed: register contact.
+    await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+    # Second call: email_body → LOW (no first-contact override).
+    result = await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+    assert result.structured_content["trust_level"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_classify_first_contact_uses_untrusted_thresholds(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """First contact applies UNTRUSTED thresholds (eff_block=0.82).
+
+    Score 0.83 would be below email_body LOW block threshold (0.87) but
+    exceeds UNTRUSTED eff_block (0.82), so the decision is block.
+    """
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.83, label="injection", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+    data = result.structured_content
+    assert data["decision"] == "block"
+    assert pytest.approx(data["threshold_applied"]["block"], abs=1e-9) == 0.82
+
+
+@pytest.mark.asyncio
+async def test_classify_two_source_ids_each_first_contact(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Two distinct source_ids each get their own independent first-contact event."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result_a = await srv.mcp.call_tool(
+        "classify",
+        {"text": "hi", "source_id": "a@example.com", "channel_type": "email_body"},
+    )
+    result_b = await srv.mcp.call_tool(
+        "classify",
+        {"text": "hi", "source_id": "b@example.com", "channel_type": "email_body"},
+    )
+    assert result_a.structured_content["is_first_contact"] is True
+    assert result_b.structured_content["is_first_contact"] is True

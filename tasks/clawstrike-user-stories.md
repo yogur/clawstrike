@@ -146,16 +146,16 @@
 
 ---
 
-### US-012: Contact Registry — First Contact Detection
+### US-012: Contact Registry — First Contact Detection ✅ DONE
 
 **Description:** As a ClawStrike user, I want ClawStrike to detect when a message comes from a never-before-seen source so that first contacts receive maximum scrutiny.
 
 **Acceptance Criteria:**
-- [ ] On each `classify` tool call, the `source_id` is looked up in the `contacts` SQLite table
-- [ ] If no matching row exists, a new record is created with `trust_level: 'auto'`, `interaction_count: 1`, and current timestamps
-- [ ] The source is treated as `untrusted` for this session regardless of channel defaults
-- [ ] The tool response includes `"is_first_contact": true`
-- [ ] The audit log records `is_first_contact: true` for this event
+- [x] On each `classify` tool call, the `source_id` is looked up in the `contacts` SQLite table
+- [x] If no matching row exists, a new record is created with `trust_level: 'auto'`, `interaction_count: 1`, and current timestamps
+- [x] The source is treated as `untrusted` for this session regardless of channel defaults
+- [x] The tool response includes `"is_first_contact": true`
+- [x] The audit log records `is_first_contact: true` for this event
 
 ---
 

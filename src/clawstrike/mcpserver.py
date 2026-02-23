@@ -9,7 +9,8 @@ from typing import Any
 from fastmcp import FastMCP
 
 from clawstrike.classifier import BaseClassifier, ClassifierResult, create_classifier
-from clawstrike.config import ClawStrikeConfig
+from clawstrike.config import ClawStrikeConfig, TrustLevel
+from clawstrike.db import get_or_create_contact, insert_audit_event, open_db
 from clawstrike.trust import compute_effective_thresholds, resolve_trust_level
 
 # ---------------------------------------------------------------------------
@@ -31,6 +32,7 @@ mcp = FastMCP(
 
 _config: ClawStrikeConfig | None = None
 _classifier: BaseClassifier | None = None
+_db_path: str | None = None
 
 # Sessions tagged for elevated scrutiny (from flag decisions in classify).
 # Keyed by session_id strings; cleared on init_server() to ensure clean state
@@ -46,10 +48,11 @@ def init_server(cfg: ClawStrikeConfig) -> None:
     For ``fastmcp run``, set the CLAWSTRIKE_CONFIG env var to the path of
     your clawstrike.yaml and the module will auto-initialize on import.
     """
-    global _config, _classifier, _elevated_sessions
+    global _config, _classifier, _elevated_sessions, _db_path
     _elevated_sessions = set()
     _classifier = create_classifier(cfg.classifier.model)
     _config = cfg
+    _db_path = str(cfg.audit.db_path)
 
 
 def _require_config() -> ClawStrikeConfig:
@@ -117,7 +120,20 @@ async def classify(
     clf = _require_classifier()
     result: ClassifierResult = clf.classify(text)
 
-    trust_level = resolve_trust_level(channel_type, cfg.trust)
+    # Contact registry — detect first contact (US-012).
+    is_first_contact = False
+    if _db_path:
+        async with open_db(_db_path) as conn:
+            _, is_first_contact = await get_or_create_contact(
+                conn, source_id, channel_type
+            )
+
+    # First contacts are always UNTRUSTED regardless of channel defaults.
+    if is_first_contact:
+        trust_level: TrustLevel = TrustLevel.UNTRUSTED
+    else:
+        trust_level = resolve_trust_level(channel_type, cfg.trust)
+
     eff_block, eff_flag = compute_effective_thresholds(
         cfg.classifier.threshold.block,
         cfg.classifier.threshold.flag,
@@ -132,6 +148,21 @@ async def classify(
     else:
         decision = "pass"
 
+    # Audit log — record is_first_contact (US-012 AC5).
+    if _db_path:
+        async with open_db(_db_path) as conn:
+            await insert_audit_event(
+                conn,
+                event_type="classify",
+                session_id=session_id,
+                source_id=source_id,
+                channel_type=channel_type,
+                decision=decision,
+                score=result.score,
+                is_first_contact=is_first_contact,
+                trust_level=trust_level.value,
+            )
+
     response: dict[str, Any] = {
         "decision": decision,
         "score": result.score,
@@ -142,6 +173,7 @@ async def classify(
         "channel_type": channel_type,
         "trust_level": trust_level.value,
         "threshold_applied": {"block": eff_block, "flag": eff_flag},
+        "is_first_contact": is_first_contact,
     }
 
     if decision == "block":

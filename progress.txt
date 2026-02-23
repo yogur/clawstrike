@@ -1,4 +1,7 @@
 ## Codebase Patterns
+- DB layer uses function-scoped connections via `open_db(path)` async context manager — idempotent `CREATE TABLE IF NOT EXISTS` DDL runs on every open (cheap for SQLite); no module-level persistent connection
+- `init_server()` in `mcpserver.py` is sync; DB path is stored as `_db_path: str | None` module global and opened lazily inside async tools
+- First-contact trust override: `classify` always calls `get_or_create_contact()` — if `is_first_contact=True`, trust is forced to UNTRUSTED regardless of channel; tests must pre-register contacts (seed call) before testing channel-specific threshold behavior
 - Trust engine is pure functions in `src/clawstrike/trust.py` — no side effects, no mocking needed in unit tests
 - `classify` tool response always includes `trust_level` and `threshold_applied` since US-011/015; tests that assert on block/flag/pass decisions must account for the channel_type modifier (e.g., `email_body` is LOW trust → eff_block = 0.87, not 0.92)
 - `gate` tool's `trust_level` field is now dynamically resolved from `channel_type`, not hardcoded
@@ -38,4 +41,33 @@
 - **High trust raises thresholds, not lowers them:** A score of 0.93 with `owner_dm` (HIGH, eff_block=0.97) results in `flag`, not `block` — it only passes block threshold but falls into flag range (eff_flag=0.80). This is correct behavior: high trust raises block threshold (fewer false positive blocks), but scores still get flagged if above eff_flag.
 - **`gate` tool now uses `cfg`:** After US-011, `_require_config()` return value is captured and used. Pre-US-011 it was called but the return value was discarded.
 - **Pure function tests need no mocking:** `test_trust.py` tests pure functions with default `TrustConfig()` — no `patch`, no `AsyncMock`, no fixtures needed. Fast and simple.
+---
+
+## [2026-02-23] - US-012
+
+### What was implemented
+
+**US-012 (Contact Registry — First Contact Detection):**
+- Created `src/clawstrike/db.py`: `open_db()` async context manager (creates schema + parent dirs), `get_or_create_contact()` (INSERT on first seen, SELECT on return), `insert_audit_event()` (writes to `audit_events` table)
+- Two SQLite tables: `contacts` (source_id PK, channel_type, trust_level, first_seen, last_seen, interaction_count) and `audit_events` (id, timestamp, event_type, session_id, source_id, channel_type, decision, score, is_first_contact, trust_level, details_json)
+- `mcpserver.py`: added `_db_path: str | None` module global set by `init_server()`; `classify` tool calls `get_or_create_contact()` → if first contact, forces `TrustLevel.UNTRUSTED` regardless of channel defaults; writes audit event after decision; includes `is_first_contact: bool` in every response
+- Added `aiosqlite>=0.19` to `pyproject.toml` dependencies
+
+### Files changed
+
+- **Created:** `src/clawstrike/db.py`
+- **Created:** `tests/test_db.py` — 11 unit tests for DB layer
+- **Modified:** `src/clawstrike/mcpserver.py` — `_db_path` global, `init_server` sets it, `classify` integrates contact registry + audit write
+- **Modified:** `tests/test_server.py` — `cfg` fixture injects temp DB path; autouse teardown resets `_db_path`; fixed 2 breaking tests; 6 new US-012 integration tests
+- **Modified:** `pyproject.toml` — added aiosqlite dependency
+- **Modified:** `CLAUDE.md` — added DB layer patterns and first-contact override notes
+
+### Test count: 99 → 116 (17 new tests)
+
+### Learnings for future iterations:
+- **`open_db` is idempotent:** `CREATE TABLE IF NOT EXISTS` in DDL means opening the same DB path multiple times is safe. Two `open_db` calls per `classify` (one for contact registry, one for audit write) is fine for SQLite.
+- **`init_server` must stay sync:** `asyncio.run()` would conflict with already-running event loop in tests (pytest-asyncio mode=auto). Store the path, open lazily inside async tools.
+- **Per-test DB isolation:** The `cfg` fixture now injects `audit.db_path = tmp_path / "test.db"`. The autouse fixture resets `srv._db_path = None` in teardown. This prevents state leakage between tests.
+- **First-contact changes trust level for ALL existing tests:** Any test that asserts on `trust_level` in a `classify` response must account for the first-contact UNTRUSTED override. Two tests were updated: `test_classify_response_includes_trust_level` (assertion changed to "untrusted") and `test_classify_high_trust_raises_block_threshold` (added seed call to pre-register contact).
+- **`aiosqlite.Row` factory:** Set `conn.row_factory = aiosqlite.Row` inside the `async with aiosqlite.connect(...)` block. Enables dict-style column access (`row["source_id"]`) which is more robust than positional indexing.
 ---
