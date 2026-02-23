@@ -1,0 +1,41 @@
+## Codebase Patterns
+- Trust engine is pure functions in `src/clawstrike/trust.py` — no side effects, no mocking needed in unit tests
+- `classify` tool response always includes `trust_level` and `threshold_applied` since US-011/015; tests that assert on block/flag/pass decisions must account for the channel_type modifier (e.g., `email_body` is LOW trust → eff_block = 0.87, not 0.92)
+- `gate` tool's `trust_level` field is now dynamically resolved from `channel_type`, not hardcoded
+
+---
+
+## [2026-02-23] - US-011 + US-015
+
+### What was implemented
+
+**US-011 (Channel Trust Level Resolution):**
+- `classify` and `gate` MCP tools now resolve `channel_type` against `trust.channel_defaults` config
+- Unknown channel types default to `TrustLevel.UNTRUSTED` (fail-closed)
+- Both tools include `trust_level` (string) in their responses
+- `gate` tool replaced hardcoded `"trust_level": "medium"` with the dynamically resolved value
+
+**US-015 (Trust-Modulated Classifier Thresholds):**
+- `classify` tool applies `trust.threshold_modifiers` to base thresholds before making the block/flag/pass decision
+- Effective thresholds are clamped to [0.0, 1.0]
+- Response includes `threshold_applied: {block: <eff>, flag: <eff>}` for transparency/audit
+
+### Files changed
+
+- **Created:** `src/clawstrike/trust.py` — `resolve_trust_level()` and `compute_effective_thresholds()` pure functions
+- **Modified:** `src/clawstrike/mcpserver.py` — wired trust resolution + threshold modulation into `classify`; resolved trust level in `gate`
+- **Created:** `tests/test_trust.py` — 13 unit tests for trust engine (resolution + modulation + clamping)
+- **Modified:** `tests/test_server.py` — 8 new integration tests for US-011/015 response fields and decision behavior
+- **Modified:** `tasks/clawstrike-user-stories.md` — marked US-011 and US-015 as DONE
+- **Modified:** `CLAUDE.md` — added trust engine patterns and classify response field notes
+- **Created:** `progress.txt` — this file
+
+### Test count: 76 → 99 (23 new tests)
+
+### Learnings for future iterations:
+
+- **Trust modulation affects existing decision tests:** when adding tests for `classify` decisions, always check what trust level the `channel_type` resolves to, since modifiers shift the effective thresholds. The existing tests use `email_body` (LOW, -0.05/-0.10) so scores like 0.95/0.80/0.30 were chosen safely outside boundary zones.
+- **High trust raises thresholds, not lowers them:** A score of 0.93 with `owner_dm` (HIGH, eff_block=0.97) results in `flag`, not `block` — it only passes block threshold but falls into flag range (eff_flag=0.80). This is correct behavior: high trust raises block threshold (fewer false positive blocks), but scores still get flagged if above eff_flag.
+- **`gate` tool now uses `cfg`:** After US-011, `_require_config()` return value is captured and used. Pre-US-011 it was called but the return value was discarded.
+- **Pure function tests need no mocking:** `test_trust.py` tests pure functions with default `TrustConfig()` — no `patch`, no `AsyncMock`, no fixtures needed. Fast and simple.
+---

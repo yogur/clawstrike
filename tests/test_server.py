@@ -478,3 +478,140 @@ async def test_classify_session_not_tagged_without_session_id(
         },
     )
     assert gate_result.structured_content["elevated_scrutiny"] is False
+
+
+# ---------------------------------------------------------------------------
+# US-011 — Channel Trust Level Resolution (integration)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_classify_response_includes_trust_level(
+    cfg: ClawStrikeConfig,
+) -> None:
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+    data = result.structured_content
+    assert "trust_level" in data
+    # email_body maps to LOW by default
+    assert data["trust_level"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_classify_response_includes_threshold_applied(
+    cfg: ClawStrikeConfig,
+) -> None:
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+    data = result.structured_content
+    assert "threshold_applied" in data
+    assert "block" in data["threshold_applied"]
+    assert "flag" in data["threshold_applied"]
+
+
+@pytest.mark.asyncio
+async def test_classify_unknown_channel_trust_level_is_untrusted(
+    cfg: ClawStrikeConfig,
+) -> None:
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "classify",
+        {"text": "hello", "source_id": "u", "channel_type": "unknown_channel"},
+    )
+    assert result.structured_content["trust_level"] == "untrusted"
+
+
+@pytest.mark.asyncio
+async def test_gate_trust_level_resolved_from_known_channel(
+    cfg: ClawStrikeConfig,
+) -> None:
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "check calendar",
+            "action_type": "calendar_read",
+            "session_id": "s1",
+            "source_id": "owner@example.com",
+            "channel_type": "owner_dm",
+        },
+    )
+    # owner_dm → HIGH
+    assert result.structured_content["trust_level"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_gate_unknown_channel_trust_level_is_untrusted(
+    cfg: ClawStrikeConfig,
+) -> None:
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "do something",
+            "action_type": "shell_exec",
+            "session_id": "s2",
+            "source_id": "x",
+            "channel_type": "telegram",
+        },
+    )
+    assert result.structured_content["trust_level"] == "untrusted"
+
+
+# ---------------------------------------------------------------------------
+# US-015 — Trust-Modulated Classifier Thresholds (integration)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_classify_untrusted_channel_blocks_at_effective_threshold(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """Score 0.83 with untrusted channel (eff_block=0.82) → block decision."""
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.83, label="injection", model="mock-model", latency_ms=2.0
+    )
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "classify",
+        {"text": "t", "source_id": "s", "channel_type": "webhook"},
+    )
+    data = result.structured_content
+    # webhook → UNTRUSTED, modifier block=-0.10 → eff_block=0.82 < 0.83 → block
+    assert data["decision"] == "block"
+    assert pytest.approx(data["threshold_applied"]["block"], abs=1e-9) == 0.82
+
+
+@pytest.mark.asyncio
+async def test_classify_high_trust_raises_block_threshold(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """Score 0.93 would block at base thresholds (0.92) but only flags at owner_dm
+    HIGH trust (eff_block=0.97, eff_flag=0.80), demonstrating the raised threshold."""
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.93, label="benign", model="mock-model", latency_ms=2.0
+    )
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "classify",
+        {"text": "t", "source_id": "owner", "channel_type": "owner_dm"},
+    )
+    data = result.structured_content
+    # owner_dm → HIGH, modifier block=+0.05 → eff_block=0.97 > 0.93 → not blocked
+    # but 0.93 ≥ eff_flag=0.80 → flag (not pass)
+    assert data["decision"] == "flag"
+    assert pytest.approx(data["threshold_applied"]["block"], abs=1e-9) == 0.97

@@ -10,6 +10,7 @@ from fastmcp import FastMCP
 
 from clawstrike.classifier import BaseClassifier, ClassifierResult, create_classifier
 from clawstrike.config import ClawStrikeConfig
+from clawstrike.trust import compute_effective_thresholds, resolve_trust_level
 
 # ---------------------------------------------------------------------------
 # Module-level server instance.
@@ -115,12 +116,18 @@ async def classify(
     cfg = _require_config()
     clf = _require_classifier()
     result: ClassifierResult = clf.classify(text)
-    block_t = cfg.classifier.threshold.block
-    flag_t = cfg.classifier.threshold.flag
 
-    if result.score >= block_t:
+    trust_level = resolve_trust_level(channel_type, cfg.trust)
+    eff_block, eff_flag = compute_effective_thresholds(
+        cfg.classifier.threshold.block,
+        cfg.classifier.threshold.flag,
+        trust_level,
+        cfg.trust.threshold_modifiers,
+    )
+
+    if result.score >= eff_block:
         decision = "block"
-    elif result.score >= flag_t:
+    elif result.score >= eff_flag:
         decision = "flag"
     else:
         decision = "pass"
@@ -133,6 +140,8 @@ async def classify(
         "latency_ms": result.latency_ms,
         "source_id": source_id,
         "channel_type": channel_type,
+        "trust_level": trust_level.value,
+        "threshold_applied": {"block": eff_block, "flag": eff_flag},
     }
 
     if decision == "block":
@@ -169,12 +178,13 @@ async def gate(
         and elevated_scrutiny (bool) reflecting whether this session was
         flagged for elevated scrutiny by a prior classify call.
     """
-    _require_config()
+    cfg = _require_config()
+    trust_level = resolve_trust_level(channel_type, cfg.trust)
     # Stub implementation — full gating engine ships in US-017 / US-018.
     return {
         "risk_level": "low",
         "recommendation": "allow",
-        "trust_level": "medium",
+        "trust_level": trust_level.value,
         "reason": "gating_not_yet_implemented",
         "elevated_scrutiny": session_id in _elevated_sessions,
         "action_type": action_type,

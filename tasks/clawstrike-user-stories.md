@@ -134,15 +134,15 @@
 
 ## Epic 3: Source-Aware Trust Tiers
 
-### US-011: Channel Trust Level Resolution
+### US-011: Channel Trust Level Resolution [DONE]
 
 **Description:** As a ClawStrike user, I want each inbound message to be assigned a base trust level based on its channel type so that inputs from different sources are treated with appropriate scrutiny.
 
 **Acceptance Criteria:**
-- [ ] The `classify` and `gate` MCP tools accept a `channel_type` parameter
-- [ ] The channel type is matched against `trust.channel_defaults` in the config
-- [ ] If the channel type is not in the config, it defaults to `untrusted`
-- [ ] The resolved trust level is included in the tool response and available for threshold modulation and gating decisions
+- [x] The `classify` and `gate` MCP tools accept a `channel_type` parameter
+- [x] The channel type is matched against `trust.channel_defaults` in the config
+- [x] If the channel type is not in the config, it defaults to `untrusted`
+- [x] The resolved trust level is included in the tool response and available for threshold modulation and gating decisions
 
 ---
 
@@ -185,15 +185,15 @@
 
 ---
 
-### US-015: Trust-Modulated Classifier Thresholds
+### US-015: Trust-Modulated Classifier Thresholds [DONE]
 
 **Description:** As a ClawStrike user, I want the classifier's block and flag thresholds to adjust based on the source's trust level so that untrusted sources face stricter scrutiny and trusted sources experience fewer false positives.
 
 **Acceptance Criteria:**
-- [ ] After resolving the source's trust level, the effective thresholds are computed by applying the configured `threshold_modifiers` to the base thresholds
-- [ ] Example: base `block` = 0.92, untrusted modifier = -0.10 → effective `block` = 0.82
-- [ ] The effective thresholds (not the base thresholds) are used for the block/flag/pass decision
-- [ ] The audit log records both the base thresholds and the effective thresholds applied
+- [x] After resolving the source's trust level, the effective thresholds are computed by applying the configured `threshold_modifiers` to the base thresholds
+- [x] Example: base `block` = 0.92, untrusted modifier = -0.10 → effective `block` = 0.82
+- [x] The effective thresholds (not the base thresholds) are used for the block/flag/pass decision
+- [ ] The audit log records both the base thresholds and the effective thresholds applied *(deferred — audit log ships in a later story)*
 
 ---
 
