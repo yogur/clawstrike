@@ -1333,3 +1333,213 @@ async def test_gate_audit_event_written(cfg: ClawStrikeConfig) -> None:
     assert details["action_type"] == "shell_exec"
     assert details["risk_level"] == "critical"
     assert details["recommendation"] == "block"
+
+
+# ---------------------------------------------------------------------------
+# US-024 — Classify audit events: full field coverage (US-008/009/010 ACs)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_classify_audit_event_has_label_model_and_thresholds(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """classify audit event includes label, model, and threshold_applied in details."""
+    import json
+
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=_SCORE_PASS, label="benign", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg)
+    await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="classify")
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["label"] == "benign"
+    assert ev["score"] == _SCORE_PASS
+    details = json.loads(ev["details_json"])
+    assert details["model"] == "mock-model"
+    assert "threshold_applied" in details
+    assert "block" in details["threshold_applied"]
+    assert "flag" in details["threshold_applied"]
+
+
+@pytest.mark.asyncio
+async def test_classify_pass_audit_event_written(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """US-010 AC: pass classify writes an audit event with decision='pass'."""
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=_SCORE_PASS, label="benign", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg)
+    await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="classify")
+    assert len(events) == 1
+    assert events[0]["decision"] == "pass"
+
+
+@pytest.mark.asyncio
+async def test_classify_block_audit_event_written_with_hash(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """US-008 AC: block classify audit event includes raw_input_hash."""
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=_SCORE_BLOCK, label="injection", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg)
+    await srv.mcp.call_tool(
+        "classify",
+        {**_CLASSIFY_ARGS, "text": "inject me"},
+    )
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="classify")
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["decision"] == "block"
+    assert ev["label"] == "injection"
+    assert ev["raw_input_hash"] is not None
+
+
+@pytest.mark.asyncio
+async def test_classify_flag_audit_event_has_elevated_scrutiny_in_details(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """US-009 AC: flag classify audit event includes elevated_scrutiny=True in details."""
+    import json
+
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=_SCORE_FLAG, label="injection", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg)
+    await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="classify")
+    assert len(events) == 1
+    details = json.loads(events[0]["details_json"])
+    assert details["elevated_scrutiny"] is True
+
+
+@pytest.mark.asyncio
+async def test_classify_pass_audit_event_has_no_elevated_scrutiny(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """pass classify audit event has elevated_scrutiny=False in details."""
+    import json
+
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=_SCORE_PASS, label="benign", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg)
+    await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="classify")
+    details = json.loads(events[0]["details_json"])
+    assert details["elevated_scrutiny"] is False
+
+
+@pytest.mark.asyncio
+async def test_classify_audit_stores_raw_input_snippet_when_log_raw_input_true(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """US-024 AC6: raw_input_snippet stored when log_raw_input=True (default)."""
+    import clawstrike.mcpserver as srv
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=_SCORE_PASS, label="benign", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg)
+    text = "hello world"
+    await srv.mcp.call_tool(
+        "classify",
+        {"text": text, "source_id": "s", "channel_type": "email_body"},
+    )
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="classify")
+    assert events[0]["raw_input_snippet"] == text
+
+
+@pytest.mark.asyncio
+async def test_classify_audit_stores_only_hash_when_log_raw_input_false(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """US-024 AC6: only SHA-256 hash stored when log_raw_input=False."""
+    import hashlib
+
+    import clawstrike.mcpserver as srv
+    from clawstrike.config import load_config
+
+    data = minimal_config(
+        {
+            "audit": {
+                "db_path": str(tmp_path / "no-raw.db"),
+                "log_raw_input": False,
+            }
+        }
+    )
+    cfg_no_raw = load_config(write_yaml(tmp_path, data))
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=_SCORE_PASS, label="benign", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg_no_raw)
+    text = "secret text"
+    await srv.mcp.call_tool(
+        "classify",
+        {"text": text, "source_id": "s", "channel_type": "email_body"},
+    )
+
+    events = await _get_audit_events(
+        str(cfg_no_raw.audit.db_path), event_type="classify"
+    )
+    ev = events[0]
+    assert ev["raw_input_snippet"] is None
+    expected_hash = hashlib.sha256(text.encode()).hexdigest()
+    assert ev["raw_input_hash"] == expected_hash
+
+
+@pytest.mark.asyncio
+async def test_classify_audit_snippet_truncated_to_max_chars(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """raw_input_snippet is truncated to raw_input_max_chars."""
+    import clawstrike.mcpserver as srv
+    from clawstrike.config import load_config
+
+    data = minimal_config(
+        {
+            "audit": {
+                "db_path": str(tmp_path / "trunc.db"),
+                "log_raw_input": True,
+                "raw_input_max_chars": 10,
+            }
+        }
+    )
+    cfg_trunc = load_config(write_yaml(tmp_path, data))
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=_SCORE_PASS, label="benign", model="mock-model", latency_ms=1.0
+    )
+    srv.init_server(cfg_trunc)
+    long_text = "a" * 50
+    await srv.mcp.call_tool(
+        "classify",
+        {"text": long_text, "source_id": "s", "channel_type": "email_body"},
+    )
+
+    events = await _get_audit_events(
+        str(cfg_trunc.audit.db_path), event_type="classify"
+    )
+    assert events[0]["raw_input_snippet"] == "a" * 10

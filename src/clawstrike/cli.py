@@ -94,6 +94,22 @@ def start(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
+    # Initialize audit DB and log status (US-023 AC4).
+    if cfg.audit.enabled:
+        from clawstrike.db import setup_audit_db
+
+        was_created, event_count = setup_audit_db(cfg.audit.db_path)
+        if was_created:
+            print(
+                f"Audit log: {cfg.audit.db_path} (created)",
+                file=sys.stderr,
+            )
+        else:
+            print(
+                f"Audit log: {cfg.audit.db_path} (ready, {event_count:,} events)",
+                file=sys.stderr,
+            )
+
     print(
         "ClawStrike MCP server started "
         f"(skill mode — advisory, stdio transport, "

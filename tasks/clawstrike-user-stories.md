@@ -120,7 +120,7 @@
 - [x] When classifier score ≥ `threshold.block`, the `classify` MCP tool returns `{"decision": "block", "score": <float>, "label": "...", "reason": "prompt_injection_detected"}`
 - [ ] The ClawStrike skill, upon receiving a block recommendation, instructs the LLM to reject the input and not act on it
 - [ ] A notification is sent to the user via the originating channel stating the input was flagged and from which source
-- [ ] The event is written to the audit log with all fields populated (classifier score, source metadata, decision: "block")
+- [x] The event is written to the audit log with all fields populated (classifier score, source metadata, decision: "block")
 
 ---
 
@@ -132,7 +132,7 @@
 - [x] When classifier score ≥ `threshold.flag` and < `threshold.block`, the `classify` MCP tool returns `{"decision": "flag", "score": <float>, "elevated_scrutiny": true}`
 - [x] The session is tagged internally as `elevated_scrutiny`
 - [x] Subsequent `gate` tool calls for this session use the next-stricter trust tier for gating recommendations (e.g., `medium` trust → treated as `low`) *(elevation surfaced in gate response; trust-downgrade logic deferred to US-022)*
-- [ ] The audit log records the flag event with `decision: "flag"` and the elevated scrutiny tag
+- [x] The audit log records the flag event with `decision: "flag"` and the elevated scrutiny tag
 
 ---
 
@@ -143,7 +143,7 @@
 **Acceptance Criteria:**
 - [x] When classifier score < `threshold.flag`, the `classify` MCP tool returns `{"decision": "pass", "score": <float>}`
 - [x] No user notification is generated
-- [ ] The event is still written to the audit log with `decision: "pass"`
+- [x] The event is still written to the audit log with `decision: "pass"`
 - [x] The `classify` tool call completes in <110ms total (classification + MCP transport overhead)
 
 ---
@@ -209,7 +209,7 @@
 - [x] After resolving the source's trust level, the effective thresholds are computed by applying the configured `threshold_modifiers` to the base thresholds
 - [x] Example: base `block` = 0.92, untrusted modifier = -0.10 → effective `block` = 0.82
 - [x] The effective thresholds (not the base thresholds) are used for the block/flag/pass decision
-- [ ] The audit log records both the base thresholds and the effective thresholds applied *(deferred — audit log ships in a later story)*
+- [x] The audit log records both the base thresholds and the effective thresholds applied
 
 ---
 
@@ -304,29 +304,29 @@
 
 ## Epic 5: Audit Log
 
-### US-023: Audit Log Database Initialization
+### US-023: Audit Log Database Initialization ✅ DONE
 
 **Description:** As a ClawStrike user, I want the audit log database to be created automatically on first startup so that logging works without manual setup.
 
 **Acceptance Criteria:**
-- [ ] On startup, if the SQLite database at `audit.db_path` does not exist, it is created with the required schema
-- [ ] If the database exists but has an outdated schema, a migration is applied automatically
-- [ ] The audit table schema supports all event fields from PRD Section 4.4 (timestamp, event_type, session_id, source, classifier, action_gate, raw_input_hash, raw_input_snippet)
-- [ ] Startup logs confirm audit database status (e.g., `Audit log: ./data/audit.db (created)` or `(ready, 1,432 events)`)
+- [x] On startup, if the SQLite database at `audit.db_path` does not exist, it is created with the required schema
+- [x] If the database exists but has an outdated schema, a migration is applied automatically
+- [x] The audit table schema supports all event fields from PRD Section 4.4 (timestamp, event_type, session_id, source, classifier, action_gate, raw_input_hash, raw_input_snippet)
+- [x] Startup logs confirm audit database status (e.g., `Audit log: ./data/audit.db (created)` or `(ready, 1,432 events)`)
 
 ---
 
-### US-024: Audit Event Writing
+### US-024: Audit Event Writing ✅ DONE
 
 **Description:** As a ClawStrike user, I want every security-relevant decision to be recorded in the audit log so that I have a forensic trail for incident response.
 
 **Acceptance Criteria:**
-- [ ] Input classification events are logged with classifier model, score, label, effective thresholds, and decision
-- [ ] Action gating events are logged with action type, risk level, trust level, recommendation, and user decision (if prompted)
-- [ ] Trust update events are logged with source ID, previous trust level, new trust level, and reason
-- [ ] Config change events are logged with the field changed and old/new values
-- [ ] All events include timestamp (UTC), session ID, and source metadata
-- [ ] When `audit.log_raw_input` is `true`, the first N characters of input are stored (N = `raw_input_max_chars`). When `false`, only the SHA-256 hash is stored.
+- [x] Input classification events are logged with classifier model, score, label, effective thresholds, and decision
+- [x] Action gating events are logged with action type, risk level, trust level, recommendation, and user decision (if prompted)
+- [x] Trust update events are logged with source ID, previous trust level, new trust level, and reason
+- [ ] Config change events are logged with the field changed and old/new values *(deferred — no config-change commands in current scope)*
+- [x] All events include timestamp (UTC), session ID, and source metadata
+- [x] When `audit.log_raw_input` is `true`, the first N characters of input are stored (N = `raw_input_max_chars`). When `false`, only the SHA-256 hash is stored.
 
 ---
 

@@ -21,6 +21,8 @@
 - DB write phase in `classify` is a single `open_db` block that can contain: `increment_interaction`, `set_contact_trust_level`, `insert_audit_event` (trust_update), and `insert_audit_event` (classify). All within one SQLite connection per request.
 - Gating engine is in `src/clawstrike/gating.py` — pure functions only: `classify_action(action_type) -> (risk_level, reason)` and `apply_decision_matrix(risk_level, trust_level) -> recommendation`. `gate` tool does NOT call `get_or_create_contact` — trust resolved from channel_type only (no first-contact override for gate).
 - `_MATRIX` in `gating.py` keys by `TrustLevel` enum (not string); works because `TrustLevel` is StrEnum and `resolve_trust_level()` returns `TrustLevel` instances.
+- Audit DB has two init paths: `setup_audit_db(path)` (sync, stdlib sqlite3) for CLI startup; `open_db(path)` (async, aiosqlite) for request-time. Both run `_apply_migrations` to add any missing columns from `_NEW_AUDIT_COLS` list.
+- `raw_input_hash` (SHA-256) always written to classify audit event; `raw_input_snippet` only when `log_raw_input=True`. `elevated_scrutiny` stored as bool in `details_json`, derived from `decision == "flag"` at write time.
 
 ---
 
@@ -288,4 +290,31 @@
 - **Pure function tests for gating need no imports from fastmcp.** `test_gating.py` has no async, no fixtures — just direct calls. Follows the same pattern as `test_trust.py`.
 - **Matrix parametrize covers all 16 cells.** Using `@pytest.mark.parametrize` for the 4×4 matrix is clean and ensures full coverage without writing 16 separate test functions.
 - **Unknown action_type defaults to high, not untrusted-equivalent block.** The fail-safe is `"high"` risk (not `"critical"`), which means a high-trust session can still auto-allow an unknown action. This is intentional — over-blocking legitimate unknown actions would harm usability more than under-blocking unknown actions from trusted sources.
+---
+
+## [2026-02-24] - US-023 / US-024 (+ open ACs in US-008/009/010/015/018)
+- What was implemented:
+  - **US-023: Audit Log DB Initialization** — `setup_audit_db(path) -> (was_created, event_count)` sync function in `db.py` uses stdlib `sqlite3` to eagerly initialize the DB at startup. `clawstrike start` calls it after `init_server` and logs `"Audit log: <path> (created)"` or `"(ready, N events)"`. `open_db()` now calls `_apply_migrations()` after DDL to add missing columns on existing DBs (`PRAGMA table_info` check → `ALTER TABLE ADD COLUMN`).
+  - **US-023: Schema additions** — `audit_events` table gains `label TEXT`, `raw_input_hash TEXT`, `raw_input_snippet TEXT` columns. Both async (`_apply_migrations`) and sync (`_apply_migrations_sync`) migration helpers implemented.
+  - **US-024: Classify audit events enriched** — `insert_audit_event` accepts `label`, `raw_input_hash`, `raw_input_snippet`. The `classify` tool: always writes `raw_input_hash = SHA-256(text)`; writes `raw_input_snippet = text[:max_chars]` when `log_raw_input=True` (default) else `None`; writes `details = {model, threshold_applied: {block, flag}, elevated_scrutiny: bool}`.
+  - **US-008 AC closed** — block events now include `raw_input_hash`, `label`, and full details in audit log.
+  - **US-009 AC closed** — flag events now have `details.elevated_scrutiny=True` in audit log.
+  - **US-010 AC closed** — pass events written (already was, now with full fields).
+  - **US-015 AC closed** — effective thresholds now recorded in classify audit event `details.threshold_applied`.
+- Files changed:
+  - `src/clawstrike/db.py` — added `_NEW_AUDIT_COLS`, `_apply_migrations`, `_apply_migrations_sync`, `setup_audit_db`; updated `_DDL` and `insert_audit_event` signature
+  - `src/clawstrike/mcpserver.py` — added `hashlib` import; classify tool now computes hash/snippet and writes enriched audit event with `details`
+  - `src/clawstrike/cli.py` — `start` command calls `setup_audit_db` and logs DB status after `init_server`
+  - `.gitignore` — added `data/` (default audit DB directory)
+  - `tests/test_db.py` — 8 new tests: schema columns, migration, new insert_audit_event fields, `setup_audit_db` (new/existing/idempotent/parent-dirs)
+  - `tests/test_server.py` — 8 new tests: full classify audit fields (label/model/thresholds), pass/flag/block decisions written, elevated_scrutiny in details, raw_input_snippet and hash
+  - `tests/test_cli.py` — 2 new tests: startup log "(created)" and "(ready, N events)"
+  - `tasks/clawstrike-user-stories.md` — marked US-023/024 ✅ DONE; closed open ACs in US-008/009/010/015
+  - `CLAUDE.md` — added audit schema and classify audit event patterns
+- **Learnings for future iterations:**
+  - `setup_audit_db` uses stdlib `sqlite3` (sync) so it can be called from non-async startup code; `open_db` uses `aiosqlite` (async) for request-time operations. Two separate code paths but the same migration logic.
+  - Migration uses `PRAGMA table_info(table_name)` to get existing columns; compare against `_NEW_AUDIT_COLS` list and `ALTER TABLE ADD COLUMN` for each missing column. This is safe to run on every open (no-op when columns already exist).
+  - `raw_input_hash` is ALWAYS written (regardless of `log_raw_input`) so forensic identification is always possible. `raw_input_snippet` is only written when `log_raw_input=True`.
+  - `elevated_scrutiny` in audit details is a bool derived from `decision == "flag"` at write time — not from the in-memory `_elevated_sessions` set (which only tracks sessions by ID).
+  - Tests for new audit fields that vary by `log_raw_input` config need a separate `cfg` with `log_raw_input: False` — create it inline with `load_config(write_yaml(tmp_path, data))` rather than using the shared `cfg` fixture.
 ---

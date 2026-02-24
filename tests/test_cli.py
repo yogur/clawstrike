@@ -337,3 +337,52 @@ def test_gate_invalid_json_exits_1(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "Invalid JSON" in result.output
+
+
+# ---------------------------------------------------------------------------
+# US-023 AC4 — startup logs audit DB status
+# ---------------------------------------------------------------------------
+
+
+def test_start_logs_audit_db_created(tmp_path: Path) -> None:
+    """start logs '(created)' when the audit DB is new."""
+    cfg_file = write_yaml(
+        tmp_path,
+        minimal_config({"audit": {"db_path": str(tmp_path / "new.db")}}),
+    )
+
+    with (
+        patch("clawstrike.mcpserver.mcp.run"),
+        patch(
+            "clawstrike.mcpserver.create_classifier", return_value=_mock_classifier()
+        ),
+    ):
+        result = runner.invoke(app, ["start", "--config", str(cfg_file)])
+
+    assert result.exit_code == 0
+    assert "(created)" in result.output
+
+
+def test_start_logs_audit_db_ready_with_event_count(tmp_path: Path) -> None:
+    """start logs '(ready, X events)' for an existing audit DB."""
+    from clawstrike.db import setup_audit_db
+
+    db_path = tmp_path / "existing.db"
+    setup_audit_db(db_path)  # pre-create the DB
+
+    cfg_file = write_yaml(
+        tmp_path,
+        minimal_config({"audit": {"db_path": str(db_path)}}),
+    )
+
+    with (
+        patch("clawstrike.mcpserver.mcp.run"),
+        patch(
+            "clawstrike.mcpserver.create_classifier", return_value=_mock_classifier()
+        ),
+    ):
+        result = runner.invoke(app, ["start", "--config", str(cfg_file)])
+
+    assert result.exit_code == 0
+    assert "ready" in result.output.lower()
+    assert "events" in result.output

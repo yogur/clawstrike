@@ -1,7 +1,9 @@
-"""Unit tests for US-012: db.py — Contact Registry and Audit Events."""
+"""Unit tests for US-012/US-023/US-024: db.py — Contact Registry and Audit Events."""
 
 from __future__ import annotations
 
+import hashlib
+import sqlite3 as _sqlite3
 from pathlib import Path
 
 import pytest
@@ -13,6 +15,7 @@ from clawstrike.db import (
     insert_audit_event,
     open_db,
     set_contact_trust_level,
+    setup_audit_db,
 )
 
 # ---------------------------------------------------------------------------
@@ -259,3 +262,154 @@ async def test_insert_audit_event_is_first_contact_false(tmp_path: Path) -> None
             row = await cur.fetchone()
 
     assert row["is_first_contact"] == 0
+
+
+# ---------------------------------------------------------------------------
+# US-023 — Audit Log Schema: new columns and migration
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_audit_events_schema_has_new_columns(tmp_path: Path) -> None:
+    """open_db creates audit_events with label, raw_input_hash, raw_input_snippet."""
+    async with open_db(tmp_path / "test.db") as conn:
+        async with conn.execute("PRAGMA table_info(audit_events)") as cur:
+            rows = await cur.fetchall()
+    col_names = {row[1] for row in rows}
+    assert "label" in col_names
+    assert "raw_input_hash" in col_names
+    assert "raw_input_snippet" in col_names
+
+
+@pytest.mark.asyncio
+async def test_open_db_migrates_old_schema(tmp_path: Path) -> None:
+    """open_db adds missing columns to a DB created without them (migration)."""
+    db_path = tmp_path / "old.db"
+    # Create a DB with the pre-US-023 schema (no new columns).
+    with _sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            """
+            CREATE TABLE audit_events (
+                id               INTEGER PRIMARY KEY AUTOINCREMENT,
+                timestamp        TIMESTAMP NOT NULL,
+                event_type       TEXT NOT NULL DEFAULT '',
+                session_id       TEXT NOT NULL DEFAULT '',
+                source_id        TEXT NOT NULL DEFAULT '',
+                channel_type     TEXT NOT NULL DEFAULT '',
+                decision         TEXT,
+                score            REAL,
+                is_first_contact INTEGER NOT NULL DEFAULT 0,
+                trust_level      TEXT,
+                details_json     TEXT NOT NULL DEFAULT '{}'
+            )
+            """
+        )
+        conn.commit()
+
+    # open_db should migrate and add the missing columns.
+    async with open_db(db_path) as conn:
+        async with conn.execute("PRAGMA table_info(audit_events)") as cur:
+            rows = await cur.fetchall()
+    col_names = {row[1] for row in rows}
+    assert "label" in col_names
+    assert "raw_input_hash" in col_names
+    assert "raw_input_snippet" in col_names
+
+
+# ---------------------------------------------------------------------------
+# US-024 — insert_audit_event: new fields (label, raw_input_hash, snippet)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_insert_audit_event_stores_label_and_raw_fields(tmp_path: Path) -> None:
+    """insert_audit_event persists label, raw_input_hash, and raw_input_snippet."""
+    text = "test input for hashing"
+    expected_hash = hashlib.sha256(text.encode()).hexdigest()
+
+    async with open_db(tmp_path / "test.db") as conn:
+        await insert_audit_event(
+            conn,
+            event_type="classify",
+            source_id="audit-user@example.com",
+            decision="pass",
+            score=0.05,
+            label="benign",
+            raw_input_hash=expected_hash,
+            raw_input_snippet=text,
+        )
+        async with conn.execute(
+            "SELECT label, raw_input_hash, raw_input_snippet "
+            "FROM audit_events WHERE source_id = ?",
+            ("audit-user@example.com",),
+        ) as cur:
+            row = await cur.fetchone()
+
+    assert row["label"] == "benign"
+    assert row["raw_input_hash"] == expected_hash
+    assert row["raw_input_snippet"] == text
+
+
+@pytest.mark.asyncio
+async def test_insert_audit_event_null_raw_fields_when_omitted(tmp_path: Path) -> None:
+    """New fields default to NULL when not provided."""
+    async with open_db(tmp_path / "test.db") as conn:
+        await insert_audit_event(
+            conn,
+            event_type="action_gate",
+            source_id="gate-user@example.com",
+        )
+        async with conn.execute(
+            "SELECT label, raw_input_hash, raw_input_snippet "
+            "FROM audit_events WHERE source_id = ?",
+            ("gate-user@example.com",),
+        ) as cur:
+            row = await cur.fetchone()
+
+    assert row["label"] is None
+    assert row["raw_input_hash"] is None
+    assert row["raw_input_snippet"] is None
+
+
+# ---------------------------------------------------------------------------
+# US-023 — setup_audit_db: synchronous startup initializer
+# ---------------------------------------------------------------------------
+
+
+def test_setup_audit_db_creates_new_db(tmp_path: Path) -> None:
+    """setup_audit_db returns (True, 0) for a brand-new database."""
+    db_path = tmp_path / "brand_new.db"
+    was_created, event_count = setup_audit_db(db_path)
+    assert was_created is True
+    assert event_count == 0
+    assert db_path.exists()
+
+
+def test_setup_audit_db_creates_parent_dirs(tmp_path: Path) -> None:
+    """setup_audit_db auto-creates missing parent directories."""
+    db_path = tmp_path / "nested" / "dir" / "audit.db"
+    setup_audit_db(db_path)
+    assert db_path.exists()
+
+
+@pytest.mark.asyncio
+async def test_setup_audit_db_reports_event_count(tmp_path: Path) -> None:
+    """setup_audit_db returns (False, N) for an existing DB with N events."""
+    db_path = tmp_path / "existing.db"
+    # Pre-populate with 3 events via the async path.
+    async with open_db(db_path) as conn:
+        for _ in range(3):
+            await insert_audit_event(conn, event_type="classify")
+
+    was_created, event_count = setup_audit_db(db_path)
+    assert was_created is False
+    assert event_count == 3
+
+
+def test_setup_audit_db_idempotent(tmp_path: Path) -> None:
+    """Calling setup_audit_db twice on the same path does not error."""
+    db_path = tmp_path / "idempotent.db"
+    setup_audit_db(db_path)
+    was_created, event_count = setup_audit_db(db_path)
+    assert was_created is False
+    assert event_count == 0

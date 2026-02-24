@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import os
 import sys
 from typing import Any
@@ -156,7 +157,13 @@ async def classify(
     else:
         decision = "pass"
 
-    # Post-decision DB writes: interaction tracking + audit log (US-013, US-012).
+    # Compute raw input fields for audit log (US-024 AC6).
+    raw_input_hash = hashlib.sha256(text.encode()).hexdigest()
+    raw_input_snippet: str | None = None
+    if cfg.audit.log_raw_input:
+        raw_input_snippet = text[: cfg.audit.raw_input_max_chars]
+
+    # Post-decision DB writes: interaction tracking + audit log (US-013, US-012, US-024).
     if _db_path:
         async with open_db(_db_path) as conn:
             # Increment interaction_count for known, non-blocked contacts (US-013 AC1).
@@ -184,6 +191,7 @@ async def classify(
                             "interaction_count": updated.interaction_count,
                         },
                     )
+            # Write classify audit event with full fields (US-024 AC1).
             await insert_audit_event(
                 conn,
                 event_type="classify",
@@ -194,6 +202,14 @@ async def classify(
                 score=result.score,
                 is_first_contact=is_first_contact,
                 trust_level=trust_level.value,
+                label=result.label,
+                raw_input_hash=raw_input_hash,
+                raw_input_snippet=raw_input_snippet,
+                details={
+                    "model": result.model,
+                    "threshold_applied": {"block": eff_block, "flag": eff_flag},
+                    "elevated_scrutiny": decision == "flag",
+                },
             )
 
     response: dict[str, Any] = {

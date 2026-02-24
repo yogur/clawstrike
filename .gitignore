@@ -49,5 +49,8 @@ venv/
 # Ruff stuff:
 .ruff_cache/
 
+# Runtime data (default audit DB location)
+data/
+
 # PyPI configuration file
 .pypirc

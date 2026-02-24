@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import sqlite3
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
@@ -12,7 +13,7 @@ from pathlib import Path
 import aiosqlite
 
 # ---------------------------------------------------------------------------
-# Schema DDL — contacts (US-012) and audit_events (US-012 AC5 / US-023)
+# Schema DDL — contacts (US-012) and audit_events (US-023/024)
 # ---------------------------------------------------------------------------
 
 _DDL = """
@@ -26,22 +27,61 @@ CREATE TABLE IF NOT EXISTS contacts (
     interaction_count INTEGER NOT NULL DEFAULT 1
 );
 CREATE TABLE IF NOT EXISTS audit_events (
-    id               INTEGER PRIMARY KEY AUTOINCREMENT,
-    timestamp        TIMESTAMP NOT NULL,
-    event_type       TEXT NOT NULL DEFAULT '',
-    session_id       TEXT NOT NULL DEFAULT '',
-    source_id        TEXT NOT NULL DEFAULT '',
-    channel_type     TEXT NOT NULL DEFAULT '',
-    decision         TEXT,
-    score            REAL,
-    is_first_contact INTEGER NOT NULL DEFAULT 0,
-    trust_level      TEXT,
-    details_json     TEXT NOT NULL DEFAULT '{}'
+    id                INTEGER PRIMARY KEY AUTOINCREMENT,
+    timestamp         TIMESTAMP NOT NULL,
+    event_type        TEXT NOT NULL DEFAULT '',
+    session_id        TEXT NOT NULL DEFAULT '',
+    source_id         TEXT NOT NULL DEFAULT '',
+    channel_type      TEXT NOT NULL DEFAULT '',
+    decision          TEXT,
+    score             REAL,
+    is_first_contact  INTEGER NOT NULL DEFAULT 0,
+    trust_level       TEXT,
+    details_json      TEXT NOT NULL DEFAULT '{}',
+    label             TEXT,
+    raw_input_hash    TEXT,
+    raw_input_snippet TEXT
 );
 """
 
+# Columns added after the original schema that must be applied via ALTER TABLE
+# when opening an existing database that pre-dates their addition.
+_NEW_AUDIT_COLS: list[tuple[str, str]] = [
+    ("label", "TEXT"),
+    ("raw_input_hash", "TEXT"),
+    ("raw_input_snippet", "TEXT"),
+]
+
 # ---------------------------------------------------------------------------
-# Connection manager
+# Migration helpers
+# ---------------------------------------------------------------------------
+
+
+async def _apply_migrations(conn: aiosqlite.Connection) -> None:
+    """Add any columns missing from audit_events (forward migration only)."""
+    async with conn.execute("PRAGMA table_info(audit_events)") as cur:
+        rows = await cur.fetchall()
+    existing = {row[1] for row in rows}
+    for col_name, col_type in _NEW_AUDIT_COLS:
+        if col_name not in existing:
+            await conn.execute(
+                f"ALTER TABLE audit_events ADD COLUMN {col_name} {col_type}"
+            )
+    await conn.commit()
+
+
+def _apply_migrations_sync(conn: sqlite3.Connection) -> None:
+    """Sync version of _apply_migrations for use in setup_audit_db."""
+    cursor = conn.execute("PRAGMA table_info(audit_events)")
+    existing = {row[1] for row in cursor.fetchall()}
+    for col_name, col_type in _NEW_AUDIT_COLS:
+        if col_name not in existing:
+            conn.execute(f"ALTER TABLE audit_events ADD COLUMN {col_name} {col_type}")
+    conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Async connection manager
 # ---------------------------------------------------------------------------
 
 
@@ -51,6 +91,8 @@ async def open_db(path: str | Path) -> AsyncIterator[aiosqlite.Connection]:
 
     Creates parent directories automatically. Schema creation is idempotent
     (``CREATE TABLE IF NOT EXISTS``), so this can be called on every request.
+    Applies forward migrations to add any columns that did not exist in
+    earlier schema versions.
     """
     db_path = Path(path)
     db_path.parent.mkdir(parents=True, exist_ok=True)
@@ -58,7 +100,37 @@ async def open_db(path: str | Path) -> AsyncIterator[aiosqlite.Connection]:
         conn.row_factory = aiosqlite.Row
         await conn.executescript(_DDL)
         await conn.commit()
+        await _apply_migrations(conn)
         yield conn
+
+
+# ---------------------------------------------------------------------------
+# Synchronous startup initializer (US-023)
+# ---------------------------------------------------------------------------
+
+
+def setup_audit_db(path: str | Path) -> tuple[bool, int]:
+    """Synchronously initialize the audit database and return status.
+
+    Uses the stdlib ``sqlite3`` module so it can be called from synchronous
+    startup code without an event loop.  Creates parent directories, creates
+    tables if they don't exist, and runs forward migrations on existing
+    databases.
+
+    Returns:
+        ``(was_created, event_count)`` where *was_created* is ``True`` when
+        the database file did not exist before this call.
+    """
+    db_path = Path(path)
+    was_created = not db_path.exists()
+    db_path.parent.mkdir(parents=True, exist_ok=True)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.executescript(_DDL)
+        conn.commit()
+        _apply_migrations_sync(conn)
+        cursor = conn.execute("SELECT COUNT(*) FROM audit_events")
+        event_count: int = cursor.fetchone()[0]
+    return was_created, event_count
 
 
 # ---------------------------------------------------------------------------
@@ -190,14 +262,18 @@ async def insert_audit_event(
     is_first_contact: bool = False,
     trust_level: str | None = None,
     details: dict | None = None,
+    label: str | None = None,
+    raw_input_hash: str | None = None,
+    raw_input_snippet: str | None = None,
 ) -> None:
     """Write one audit event row to ``audit_events``."""
     now = datetime.now(UTC).isoformat()
     await conn.execute(
         "INSERT INTO audit_events "
         "(timestamp, event_type, session_id, source_id, channel_type, "
-        "decision, score, is_first_contact, trust_level, details_json) "
-        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "decision, score, is_first_contact, trust_level, details_json, "
+        "label, raw_input_hash, raw_input_snippet) "
+        "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
         (
             now,
             event_type,
@@ -209,6 +285,9 @@ async def insert_audit_event(
             1 if is_first_contact else 0,
             trust_level,
             json.dumps(details or {}),
+            label,
+            raw_input_hash,
+            raw_input_snippet,
         ),
     )
     await conn.commit()
