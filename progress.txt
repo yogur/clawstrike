@@ -7,6 +7,8 @@
 - `gate` tool's `trust_level` field is now dynamically resolved from `channel_type`, not hardcoded
 - Interaction tracking: `classify` captures full `ContactRecord` (not just `is_first_contact`) from phase-1 DB read; phase-2 DB block performs increment + conditional auto-promotion. Auto-promo guard: `contact.trust_level == "auto"` (pre-increment) ensures manual overrides ('trusted'/'blocked') are never overwritten.
 - DB write phase in `classify` is a single `open_db` block that can contain: `increment_interaction`, `set_contact_trust_level`, `insert_audit_event` (trust_update), and `insert_audit_event` (classify). All within one SQLite connection per request.
+- Gating engine is in `src/clawstrike/gating.py` — pure functions only: `classify_action(action_type) -> (risk_level, reason)` and `apply_decision_matrix(risk_level, trust_level) -> recommendation`. `gate` tool does NOT call `get_or_create_contact` — trust resolved from channel_type only (no first-contact override for gate).
+- `_MATRIX` in `gating.py` keys by `TrustLevel` enum (not string); works because `TrustLevel` is StrEnum and `resolve_trust_level()` returns `TrustLevel` instances.
 
 ---
 
@@ -100,4 +102,36 @@
 - **Block the entire phase-2 in one `open_db` context.** Consolidating increment + optional trust update + audit events into a single connection avoids 3 separate `open_db` calls and is still safe since `open_db` is idempotent.
 - **`_get_contact_from_db` helper re-uses `get_or_create_contact`.** This works because a known contact just returns `is_first_contact=False` with the stored record. Slightly indirect but avoids duplicating the SELECT query.
 - **`auto_promote_after` is checked AFTER the increment.** So with `auto_promote_after=5`, the 5th total non-blocked interaction (count 1 from creation + 4 increments → count=5 on the 5th classify call, but actually: count=1 from creation, then 1st non-first-contact call: count=2, ..., 4th: count=5) triggers promotion. Test uses 5 total `call_tool` calls (1 first-contact + 4 increments = count=5 → promote).
+---
+
+## [2026-02-24] - US-017 + US-018
+
+### What was implemented
+
+**US-017 (Advisory Action Classification via API):**
+- Created `src/clawstrike/gating.py`: `classify_action(action_type) -> (risk_level, reason)` pure function that matches action_type against `_TAXONOMY` dict (27 entries covering all PRD 4.3.1 categories). Unknown types default to `"high"` (fail-safe) with reason `"unknown_action_type_defaulted_to_high"`. Known types return `"taxonomy_match"`.
+- Full taxonomy: Critical (exec/spawn/system/child_process/shell_exec, outbound_network_unknown/curl/wget/fetch, skill_install/skill_modify, cron_create/cron_modify), High (send_email/send_message, file_write, calendar_modify/contact_modify), Medium (file_read_sensitive, web_browse/web_navigate/form_submit), Low (file_read, calendar_read, list_directory)
+
+**US-018 (Gating Recommendation Matrix):**
+- `apply_decision_matrix(risk_level, trust_level) -> str` pure function implementing the full 4×4 PRD matrix.
+- `gate` tool in `mcpserver.py` now calls both functions; replaced stub with real taxonomy + matrix logic.
+- Writes `action_gate` audit event via `insert_audit_event` with `decision=recommendation`, `trust_level`, and `details={action_type, action_description, risk_level, recommendation}`.
+
+### Files changed
+
+- **Created:** `src/clawstrike/gating.py` — taxonomy dict + `classify_action()` + `_MATRIX` + `apply_decision_matrix()`
+- **Modified:** `src/clawstrike/mcpserver.py` — added `from clawstrike.gating import ...`, replaced stub `gate` with taxonomy + matrix + audit write
+- **Created:** `tests/test_gating.py` — 32 unit tests (16 taxonomy, 16 matrix via parametrize)
+- **Modified:** `tests/test_server.py` — 13 new integration tests for US-017/018
+- **Modified:** `tasks/clawstrike-user-stories.md` — marked US-017 and US-018 as DONE
+- **Modified:** `CLAUDE.md` — added gating engine patterns and gate audit event notes
+
+### Test count: 131 → 178 (47 new tests)
+
+### Learnings for future iterations:
+- **`_MATRIX` uses `TrustLevel` enum keys directly.** The dict is keyed by `TrustLevel` instances (not strings), which works because `TrustLevel` is a `StrEnum`. `resolve_trust_level()` returns a `TrustLevel`, so direct lookup works: `_MATRIX[risk_level][trust_level]`.
+- **`gate` tool does NOT call `get_or_create_contact`.** Trust is resolved purely from channel_type (no DB lookup). This differs from `classify`. This means gate tool's trust_level doesn't reflect first-contact overrides — that's intentional for the MVP since gate is called per-action, not per-message source.
+- **Pure function tests for gating need no imports from fastmcp.** `test_gating.py` has no async, no fixtures — just direct calls. Follows the same pattern as `test_trust.py`.
+- **Matrix parametrize covers all 16 cells.** Using `@pytest.mark.parametrize` for the 4×4 matrix is clean and ensures full coverage without writing 16 separate test functions.
+- **Unknown action_type defaults to high, not untrusted-equivalent block.** The fail-safe is `"high"` risk (not `"critical"`), which means a high-trust session can still auto-allow an unknown action. This is intentional — over-blocking legitimate unknown actions would harm usability more than under-blocking unknown actions from trusted sources.
 ---

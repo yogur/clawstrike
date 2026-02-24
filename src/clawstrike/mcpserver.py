@@ -17,6 +17,7 @@ from clawstrike.db import (
     open_db,
     set_contact_trust_level,
 )
+from clawstrike.gating import apply_decision_matrix, classify_action
 from clawstrike.trust import compute_effective_thresholds, resolve_trust_level
 
 # ---------------------------------------------------------------------------
@@ -244,12 +245,37 @@ async def gate(
     """
     cfg = _require_config()
     trust_level = resolve_trust_level(channel_type, cfg.trust)
-    # Stub implementation — full gating engine ships in US-017 / US-018.
+
+    # US-017: classify action_type against the hardcoded risk taxonomy.
+    risk_level, reason = classify_action(action_type)
+
+    # US-018: apply the gating decision matrix.
+    recommendation = apply_decision_matrix(risk_level, trust_level)
+
+    # Write audit event for each gating decision (US-018 AC2).
+    if _db_path:
+        async with open_db(_db_path) as conn:
+            await insert_audit_event(
+                conn,
+                event_type="action_gate",
+                session_id=session_id,
+                source_id=source_id,
+                channel_type=channel_type,
+                decision=recommendation,
+                trust_level=trust_level.value,
+                details={
+                    "action_type": action_type,
+                    "action_description": action_description,
+                    "risk_level": risk_level,
+                    "recommendation": recommendation,
+                },
+            )
+
     return {
-        "risk_level": "low",
-        "recommendation": "allow",
+        "risk_level": risk_level,
+        "recommendation": recommendation,
         "trust_level": trust_level.value,
-        "reason": "gating_not_yet_implemented",
+        "reason": reason,
         "elevated_scrutiny": session_id in _elevated_sessions,
         "action_type": action_type,
         "session_id": session_id,

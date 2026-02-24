@@ -988,3 +988,348 @@ async def test_classify_auto_promote_only_once(
     events = await _get_audit_events(str(cfg.audit.db_path), event_type="trust_update")
     # Exactly one trust_update event (from the 5th call).
     assert len(events) == 1
+
+
+# ---------------------------------------------------------------------------
+# US-017 — Advisory Action Classification via API (integration)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gate_risk_level_from_taxonomy(cfg: ClawStrikeConfig) -> None:
+    """shell_exec maps to 'critical' via the hardcoded taxonomy."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Run a shell command",
+            "action_type": "shell_exec",
+            "session_id": "s",
+            "source_id": "x",
+            "channel_type": "owner_dm",
+        },
+    )
+    assert result.structured_content["risk_level"] == "critical"
+
+
+@pytest.mark.asyncio
+async def test_gate_unknown_action_type_defaults_to_high(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Unrecognised action_type defaults to 'high' risk (fail-safe)."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Do something unusual",
+            "action_type": "completely_unknown_action",
+            "session_id": "s",
+            "source_id": "x",
+            "channel_type": "owner_dm",
+        },
+    )
+    assert result.structured_content["risk_level"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_gate_reason_is_taxonomy_match_for_known_type(
+    cfg: ClawStrikeConfig,
+) -> None:
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Read a calendar entry",
+            "action_type": "calendar_read",
+            "session_id": "s",
+            "source_id": "x",
+            "channel_type": "owner_dm",
+        },
+    )
+    assert result.structured_content["reason"] == "taxonomy_match"
+
+
+@pytest.mark.asyncio
+async def test_gate_reason_explains_unknown_default(cfg: ClawStrikeConfig) -> None:
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Mystery action",
+            "action_type": "mystery",
+            "session_id": "s",
+            "source_id": "x",
+            "channel_type": "owner_dm",
+        },
+    )
+    assert (
+        result.structured_content["reason"] == "unknown_action_type_defaulted_to_high"
+    )
+
+
+# ---------------------------------------------------------------------------
+# US-018 — Gating Recommendation Matrix (integration)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_gate_critical_high_trust_recommends_prompt_user(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Critical action from HIGH trust source → prompt_user."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Execute shell command",
+            "action_type": "shell_exec",
+            "session_id": "s",
+            "source_id": "owner",
+            "channel_type": "owner_dm",  # HIGH trust
+        },
+    )
+    data = result.structured_content
+    assert data["risk_level"] == "critical"
+    assert data["trust_level"] == "high"
+    assert data["recommendation"] == "prompt_user"
+
+
+@pytest.mark.asyncio
+async def test_gate_critical_low_trust_recommends_block(cfg: ClawStrikeConfig) -> None:
+    """Critical action from LOW trust source → block."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Execute shell command",
+            "action_type": "shell_exec",
+            "session_id": "s",
+            "source_id": "attacker",
+            "channel_type": "email_body",  # LOW trust
+        },
+    )
+    data = result.structured_content
+    assert data["risk_level"] == "critical"
+    assert data["trust_level"] == "low"
+    assert data["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_gate_critical_untrusted_recommends_block(cfg: ClawStrikeConfig) -> None:
+    """Critical action from UNTRUSTED source → block."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Execute shell command",
+            "action_type": "shell_exec",
+            "session_id": "s",
+            "source_id": "anon",
+            "channel_type": "webhook",  # UNTRUSTED
+        },
+    )
+    assert result.structured_content["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_gate_high_risk_high_trust_recommends_allow(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """High risk action from HIGH trust source → allow."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Send an email",
+            "action_type": "send_email",
+            "session_id": "s",
+            "source_id": "owner",
+            "channel_type": "owner_dm",  # HIGH trust
+        },
+    )
+    data = result.structured_content
+    assert data["risk_level"] == "high"
+    assert data["trust_level"] == "high"
+    assert data["recommendation"] == "allow"
+
+
+@pytest.mark.asyncio
+async def test_gate_high_risk_medium_trust_recommends_prompt_user(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """High risk action from MEDIUM trust source → prompt_user."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Send a message",
+            "action_type": "send_message",
+            "session_id": "s",
+            "source_id": "team",
+            "channel_type": "trusted_group",  # MEDIUM trust
+        },
+    )
+    data = result.structured_content
+    assert data["risk_level"] == "high"
+    assert data["trust_level"] == "medium"
+    assert data["recommendation"] == "prompt_user"
+
+
+@pytest.mark.asyncio
+async def test_gate_high_risk_low_trust_recommends_block(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """High risk action from LOW trust source → block."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Send an email",
+            "action_type": "send_email",
+            "session_id": "s",
+            "source_id": "newsletter",
+            "channel_type": "email_body",  # LOW trust
+        },
+    )
+    assert result.structured_content["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_gate_medium_risk_low_trust_recommends_prompt_user(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Medium risk action from LOW trust source → prompt_user."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Browse a URL",
+            "action_type": "web_browse",
+            "session_id": "s",
+            "source_id": "external",
+            "channel_type": "email_body",  # LOW trust
+        },
+    )
+    data = result.structured_content
+    assert data["risk_level"] == "medium"
+    assert data["recommendation"] == "prompt_user"
+
+
+@pytest.mark.asyncio
+async def test_gate_medium_risk_untrusted_recommends_block(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Medium risk action from UNTRUSTED source → block."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Read sensitive file",
+            "action_type": "file_read_sensitive",
+            "session_id": "s",
+            "source_id": "bot",
+            "channel_type": "webhook",  # UNTRUSTED
+        },
+    )
+    assert result.structured_content["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_gate_low_risk_low_trust_recommends_allow(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Low risk action from LOW trust source → allow."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Read calendar",
+            "action_type": "calendar_read",
+            "session_id": "s",
+            "source_id": "user",
+            "channel_type": "email_body",  # LOW trust
+        },
+    )
+    data = result.structured_content
+    assert data["risk_level"] == "low"
+    assert data["recommendation"] == "allow"
+
+
+@pytest.mark.asyncio
+async def test_gate_low_risk_untrusted_recommends_prompt_user(
+    cfg: ClawStrikeConfig,
+) -> None:
+    """Low risk action from UNTRUSTED source → prompt_user."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "List files",
+            "action_type": "list_directory",
+            "session_id": "s",
+            "source_id": "unknown",
+            "channel_type": "webhook",  # UNTRUSTED
+        },
+    )
+    assert result.structured_content["recommendation"] == "prompt_user"
+
+
+@pytest.mark.asyncio
+async def test_gate_audit_event_written(cfg: ClawStrikeConfig) -> None:
+    """gate tool writes an action_gate audit event with the gating decision."""
+    import json
+
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Execute shell command",
+            "action_type": "shell_exec",
+            "session_id": "audit-test-session",
+            "source_id": "attacker@evil.com",
+            "channel_type": "email_body",
+        },
+    )
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="action_gate")
+    assert len(events) == 1
+    ev = events[0]
+    assert ev["source_id"] == "attacker@evil.com"
+    assert ev["channel_type"] == "email_body"
+    assert ev["session_id"] == "audit-test-session"
+    assert ev["decision"] == "block"
+    assert ev["trust_level"] == "low"
+    details = json.loads(ev["details_json"])
+    assert details["action_type"] == "shell_exec"
+    assert details["risk_level"] == "critical"
+    assert details["recommendation"] == "block"

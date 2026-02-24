@@ -211,29 +211,29 @@
 
 ## Epic 4: Action Gating (Advisory)
 
-### US-017: Advisory Action Classification via API
+### US-017: Advisory Action Classification via API ✅ DONE
 
 **Description:** As a ClawStrike user, I want the `gate` MCP tool to classify LLM-reported actions by risk level so that the skill can advise the LLM on whether to proceed.
 
 **Acceptance Criteria:**
-- [ ] The `gate` MCP tool accepts `action_description`, `action_type`, `session_id`, `source_id`, and `channel_type` parameters
-- [ ] The `action_type` is matched against the hardcoded action risk taxonomy (PRD Section 4.3.1) and assigned a risk level: `critical`, `high`, `medium`, or `low`
-- [ ] If `action_type` matches no taxonomy entry, it defaults to `high` (fail-safe)
-- [ ] The tool returns `{"risk_level": "...", "recommendation": "allow|block|prompt_user", "trust_level": "...", "reason": "..."}`
+- [x] The `gate` MCP tool accepts `action_description`, `action_type`, `session_id`, `source_id`, and `channel_type` parameters
+- [x] The `action_type` is matched against the hardcoded action risk taxonomy (PRD Section 4.3.1) and assigned a risk level: `critical`, `high`, `medium`, or `low`
+- [x] If `action_type` matches no taxonomy entry, it defaults to `high` (fail-safe)
+- [x] The tool returns `{"risk_level": "...", "recommendation": "allow|block|prompt_user", "trust_level": "...", "reason": "..."}`
 
 ---
 
-### US-018: Gating Recommendation Matrix
+### US-018: Gating Recommendation Matrix ✅ DONE
 
 **Description:** As a ClawStrike user, I want the gating recommendation to reflect both the action's risk and the session's trust level so that the skill gives appropriate advice to the LLM.
 
 **Acceptance Criteria:**
-- [ ] The recommendation matrix from PRD Section 4.3.2 is implemented:
+- [x] The recommendation matrix from PRD Section 4.3.2 is implemented:
   - Critical + High Trust → `prompt_user`; Critical + Medium/Low/Untrusted → `block`
   - High + High Trust → `allow`; High + Medium → `prompt_user`; High + Low/Untrusted → `block`
   - Medium + High/Medium → `allow`; Medium + Low → `prompt_user`; Medium + Untrusted → `block`
   - Low + High/Medium/Low → `allow`; Low + Untrusted → `prompt_user`
-- [ ] The audit log records each gating recommendation with action type, risk level, trust level, and recommendation
+- [x] The audit log records each gating recommendation with action type, risk level, trust level, and recommendation
 
 ---
 
