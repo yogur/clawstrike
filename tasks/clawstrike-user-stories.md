@@ -66,7 +66,7 @@
 
 ---
 
-### US-004: Graceful Shutdown [POSTPONED]
+### US-004: Graceful Shutdown *(Deferred — Phase 1.5)*
 
 **Description:** As a ClawStrike user, I want ClawStrike to shut down cleanly so that in-flight requests complete and no data is lost.
 
@@ -124,7 +124,7 @@
 
 ---
 
-### US-009: Flag Threshold — Elevated Scrutiny
+### US-009: Flag Threshold — Elevated Scrutiny [DONE]
 
 **Description:** As a ClawStrike user, I want messages scoring between the flag and block thresholds to be marked for elevated scrutiny so that suspicious-but-uncertain inputs get tighter action gating recommendations.
 
@@ -136,7 +136,7 @@
 
 ---
 
-### US-010: Benign Input Passthrough
+### US-010: Benign Input Passthrough [DONE]
 
 **Description:** As a ClawStrike user, I want messages scoring below the flag threshold to pass through with no interference so that normal usage is unaffected.
 
@@ -187,7 +187,7 @@
 
 ---
 
-### US-014: Manual Contact Trust Override
+### US-014: Manual Contact Trust Override *(Deferred — Phase 1.5)*
 
 **Description:** As a ClawStrike user, I want to manually trust or block specific contacts so that I can override automatic trust decisions.
 
@@ -281,7 +281,7 @@ Note: should not be possible by default unless config file exists and allows thi
 
 ---
 
-### US-021: Action Allowlist Management via CLI
+### US-021: Action Allowlist Management via CLI *(Deferred — Phase 1.5)*
 
 **Description:** As a ClawStrike user, I want to view and remove allowlist rules via the CLI so that I can audit and revoke permissions I've previously granted.
 
@@ -395,7 +395,7 @@ Note: should not be possible by default unless config file exists and allows thi
 
 ## Epic 6: Phase 2 Interface Hooks (Defined in MVP, Implemented Later)
 
-### US-030: LLM-as-Judge Hook Point in Gating Pipeline
+### US-030: LLM-as-Judge Hook Point in Gating Pipeline *(Deferred — Phase 2)*
 
 **Description:** As a developer extending ClawStrike, I want the gating pipeline to include a defined hook point for an async judge so that Phase 2's LLM-as-Judge can be integrated without refactoring the gating logic.
 
@@ -407,7 +407,7 @@ Note: should not be possible by default unless config file exists and allows thi
 
 ---
 
-### US-031: Configuration Validation for Future Phase Fields
+### US-031: Configuration Validation for Future Phase Fields *(Deferred — Phase 2)*
 
 **Description:** As a ClawStrike user, I want future phase configuration fields (e.g., `llm_judge`, `proxy`) to be accepted in the config file without errors so that I can pre-configure them and enable them later.
 
