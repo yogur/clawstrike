@@ -47,6 +47,11 @@ _db_path: str | None = None
 # across restarts.
 _elevated_sessions: set[str] = set()
 
+# Sessions where a content-source mismatch was detected (US-016): a high/medium
+# trust contact sent content that scored above the base flag threshold.
+# These sessions have their effective trust downgraded to LOW in gate calls.
+_mismatch_sessions: set[str] = set()
+
 
 def init_server(cfg: ClawStrikeConfig) -> None:
     """Inject configuration into the module-level server.
@@ -56,8 +61,9 @@ def init_server(cfg: ClawStrikeConfig) -> None:
     For ``fastmcp run``, set the CLAWSTRIKE_CONFIG env var to the path of
     your clawstrike.yaml and the module will auto-initialize on import.
     """
-    global _config, _classifier, _elevated_sessions, _db_path
+    global _config, _classifier, _elevated_sessions, _mismatch_sessions, _db_path
     _elevated_sessions = set()
+    _mismatch_sessions = set()
     _classifier = create_classifier(cfg.classifier.model)
     _config = cfg
     _db_path = str(cfg.audit.db_path)
@@ -157,6 +163,17 @@ async def classify(
     else:
         decision = "pass"
 
+    # US-016: content-source mismatch detection.
+    # Fire when a high/medium trust contact sends content that scores above the
+    # *base* flag threshold (before trust modulation).  Tag the session so that
+    # gate calls downgrade the effective trust to LOW for this session.
+    mismatch = (
+        trust_level in (TrustLevel.HIGH, TrustLevel.MEDIUM)
+        and result.score >= cfg.classifier.threshold.flag
+    )
+    if mismatch and session_id:
+        _mismatch_sessions.add(session_id)
+
     # Compute raw input fields for audit log (US-024 AC6).
     raw_input_hash = hashlib.sha256(text.encode()).hexdigest()
     raw_input_snippet: str | None = None
@@ -191,6 +208,23 @@ async def classify(
                             "interaction_count": updated.interaction_count,
                         },
                     )
+            # Write content-source mismatch audit event (US-016 AC3).
+            if mismatch:
+                await insert_audit_event(
+                    conn,
+                    event_type="trust_update",
+                    session_id=session_id,
+                    source_id=source_id,
+                    channel_type=channel_type,
+                    trust_level=TrustLevel.LOW.value,
+                    details={
+                        "previous_trust": trust_level.value,
+                        "new_trust": TrustLevel.LOW.value,
+                        "reason": "content_source_mismatch",
+                        "score": result.score,
+                        "base_flag_threshold": cfg.classifier.threshold.flag,
+                    },
+                )
             # Write classify audit event with full fields (US-024 AC1).
             await insert_audit_event(
                 conn,
@@ -209,6 +243,7 @@ async def classify(
                     "model": result.model,
                     "threshold_applied": {"block": eff_block, "flag": eff_flag},
                     "elevated_scrutiny": decision == "flag",
+                    "content_source_mismatch": mismatch,
                 },
             )
 
@@ -223,6 +258,7 @@ async def classify(
         "trust_level": trust_level.value,
         "threshold_applied": {"block": eff_block, "flag": eff_flag},
         "is_first_contact": is_first_contact,
+        "content_source_mismatch": mismatch,
     }
 
     if decision == "block":
@@ -262,11 +298,17 @@ async def gate(
     cfg = _require_config()
     base_trust_level = resolve_trust_level(channel_type, cfg.trust)
 
+    # US-016: force effective trust to LOW when a content-source mismatch was
+    # detected in a prior classify call for this session.  Applied before the
+    # elevated-scrutiny downgrade so both stack correctly.
+    mismatch = session_id in _mismatch_sessions
+    effective_trust_level = TrustLevel.LOW if mismatch else base_trust_level
+
     # US-022: downgrade trust by one tier when session has elevated scrutiny.
+    # Stacks with mismatch: if mismatch forced LOW, elevated_scrutiny → UNTRUSTED.
     elevated = session_id in _elevated_sessions
-    effective_trust_level = (
-        downgrade_trust(base_trust_level) if elevated else base_trust_level
-    )
+    if elevated:
+        effective_trust_level = downgrade_trust(effective_trust_level)
 
     # US-017: classify action_type against the hardcoded risk taxonomy.
     risk_level, reason = classify_action(action_type)
@@ -293,6 +335,7 @@ async def gate(
                     "recommendation": recommendation,
                     "original_trust_level": base_trust_level.value,
                     "elevated_scrutiny": elevated,
+                    "content_source_mismatch": mismatch,
                 },
             )
 
@@ -303,6 +346,7 @@ async def gate(
         "effective_trust_level": effective_trust_level.value,
         "reason": reason,
         "elevated_scrutiny": elevated,
+        "content_source_mismatch": mismatch,
         "action_type": action_type,
         "session_id": session_id,
         "source_id": source_id,

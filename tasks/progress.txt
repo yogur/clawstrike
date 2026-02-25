@@ -23,6 +23,7 @@
 - `_MATRIX` in `gating.py` keys by `TrustLevel` enum (not string); works because `TrustLevel` is StrEnum and `resolve_trust_level()` returns `TrustLevel` instances.
 - Audit DB has two init paths: `setup_audit_db(path)` (sync, stdlib sqlite3) for CLI startup; `open_db(path)` (async, aiosqlite) for request-time. Both run `_apply_migrations` to add any missing columns from `_NEW_AUDIT_COLS` list.
 - `raw_input_hash` (SHA-256) always written to classify audit event; `raw_input_snippet` only when `log_raw_input=True`. `elevated_scrutiny` stored as bool in `details_json`, derived from `decision == "flag"` at write time.
+- Content-source mismatch (US-016): `_mismatch_sessions` global in `mcpserver.py` works like `_elevated_sessions`. Mismatch condition: `trust_level in (HIGH, MEDIUM) AND score >= base_flag` — fires independently of the effective decision (pass/flag/block). In `gate`, mismatch forces effective trust to LOW (applied BEFORE elevated_scrutiny downgrade). Teardown must clear both sets.
 
 ---
 
@@ -342,4 +343,27 @@
   - `downgrade_trust` is designed to be called once per downgrade source — US-016 (content-source mismatch) will simply call it again on the already-downgraded result
   - `_make_cfg_with_trust()` helper in test_server.py creates a config with a specific channel→trust mapping for scenario testing; use this pattern for future trust-related tests
   - Avoid string annotations in test helpers (e.g., `-> "ClawStrikeConfig"`) — ruff UP037 flags them as fixable
+---
+
+## [2026-02-25] - US-016
+
+- What was implemented:
+  - Content-source mismatch detection in `classify`: when a known HIGH or MEDIUM trust contact sends content scoring ≥ the base `flag` threshold (before trust modulation), a mismatch is detected
+  - Session tracking via `_mismatch_sessions: set[str]` module global in `mcpserver.py` (parallel to `_elevated_sessions`)
+  - `init_server()` resets `_mismatch_sessions` alongside `_elevated_sessions`
+  - In `gate`: mismatch forces effective trust to `LOW` (applied before elevated-scrutiny downgrade). Stacking: mismatch→LOW, then elevated_scrutiny→UNTRUSTED
+  - Mismatch `trust_update` audit event with `reason: "content_source_mismatch"`, written in the classify DB block
+  - `content_source_mismatch: bool` added to both `classify` and `gate` responses
+  - `content_source_mismatch: bool` added to `gate` audit event `details_json`
+- Files changed:
+  - `src/clawstrike/mcpserver.py` — `_mismatch_sessions` global, `init_server` reset, mismatch detection in `classify`, mismatch downgrade in `gate`
+  - `tests/test_server.py` — 15 new tests covering all US-016 ACs; teardown resets `_mismatch_sessions`
+  - `CLAUDE.md` — documented mismatch pattern, updated MCP server globals list and gate response fields
+  - `tasks/clawstrike-user-stories.md` — marked US-016 complete
+- **Learnings for future iterations:**
+  - Mismatch fires independently of the effective classify decision: a HIGH trust contact (effective_flag=0.80) scoring 0.75 gets a "pass" decision but still triggers mismatch (score ≥ base_flag=0.70). Test this explicitly — it's the key security insight of the story.
+  - First-contact forces UNTRUSTED, so mismatch can never fire for first-time contacts (they won't be in HIGH/MEDIUM). No special guard needed.
+  - Gate downgrade order matters: apply mismatch (→ LOW) BEFORE elevated_scrutiny (`downgrade_trust`). Wrong order would give different results for stacked sessions.
+  - The `_make_cfg_with_trust()` helper already present in test_server.py is ideal for US-016 tests — reuse it.
+  - Always seed a contact (benign classify call) before testing trust-sensitive behavior — otherwise first-contact override masks the intended trust level.
 ---

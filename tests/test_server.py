@@ -67,6 +67,7 @@ def reset_server_config():
     srv._config = None
     srv._classifier = None
     srv._elevated_sessions.clear()
+    srv._mismatch_sessions.clear()
     srv._db_path = None
 
 
@@ -1811,3 +1812,561 @@ async def test_gate_elevated_via_classify_flag_end_to_end(
     assert gate_data["elevated_scrutiny"] is True
     # send_email HIGH risk + MEDIUM trust → prompt_user (stricter than allow at HIGH)
     assert gate_data["recommendation"] == "prompt_user"
+
+
+# ---------------------------------------------------------------------------
+# US-016 — Content-Source Mismatch Detection
+# ---------------------------------------------------------------------------
+#
+# Mismatch fires when: trust_level in (HIGH, MEDIUM) AND score >= base_flag.
+# Default config: base_flag=0.70, base_block=0.92.
+# HIGH trust effective thresholds: flag=0.80, block=0.97
+# MEDIUM trust effective thresholds: flag=0.70, block=0.92
+
+
+@pytest.mark.asyncio
+async def test_classify_mismatch_detected_high_trust_pass_decision(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """HIGH trust contact + score in (base_flag, eff_flag) → pass decision + mismatch.
+
+    This is the key scenario: HIGH trust lowers the effective flag (raises it
+    to 0.80), so the message passes classification.  But it still exceeds the
+    *base* flag threshold (0.70), triggering content_source_mismatch detection.
+    """
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    # Seed: register the contact as known.
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "hello",
+            "source_id": "trusted-user",
+            "channel_type": "test_chan",
+        },
+    )
+
+    # Now classify with score in (0.70, 0.80) — above base_flag, below eff_flag for HIGH.
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.75, label="injection", model="mock-model", latency_ms=2.0
+    )
+    result = await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "suspicious content",
+            "source_id": "trusted-user",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    # Score 0.75 < eff_flag 0.80 → pass (HIGH trust leniency)
+    assert data["decision"] == "pass"
+    # But score 0.75 ≥ base_flag 0.70 → mismatch
+    assert data["content_source_mismatch"] is True
+    assert data["trust_level"] == "high"
+
+
+@pytest.mark.asyncio
+async def test_classify_mismatch_detected_medium_trust(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """MEDIUM trust contact + score >= base_flag → mismatch detected."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "medium")
+    srv.init_server(cfg)
+
+    # Seed: register the contact.
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "hello",
+            "source_id": "medium-user",
+            "channel_type": "test_chan",
+        },
+    )
+
+    # Score 0.75 ≥ effective_flag 0.70 (MEDIUM modifier=0) → flag decision + mismatch.
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.75, label="injection", model="mock-model", latency_ms=2.0
+    )
+    result = await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "suspicious content",
+            "source_id": "medium-user",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    assert data["decision"] == "flag"
+    assert data["content_source_mismatch"] is True
+    assert data["trust_level"] == "medium"
+
+
+@pytest.mark.asyncio
+async def test_classify_no_mismatch_score_below_base_flag(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Score below base_flag → no mismatch even for HIGH trust contacts."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    # Seed contact.
+    await srv.mcp.call_tool(
+        "classify",
+        {"text": "hi", "source_id": "user", "channel_type": "test_chan"},
+    )
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.50, label="benign", model="mock-model", latency_ms=1.0
+    )
+    result = await srv.mcp.call_tool(
+        "classify",
+        {"text": "normal text", "source_id": "user", "channel_type": "test_chan"},
+    )
+    assert result.structured_content["content_source_mismatch"] is False
+
+
+@pytest.mark.asyncio
+async def test_classify_no_mismatch_low_trust_above_base_flag(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """LOW trust contacts above base_flag → no mismatch (only HIGH/MEDIUM trigger it)."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "low")
+    srv.init_server(cfg)
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {"text": "hi", "source_id": "low-user", "channel_type": "test_chan"},
+    )
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.75, label="injection", model="mock-model", latency_ms=2.0
+    )
+    result = await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "suspicious",
+            "source_id": "low-user",
+            "channel_type": "test_chan",
+        },
+    )
+    assert result.structured_content["content_source_mismatch"] is False
+
+
+@pytest.mark.asyncio
+async def test_classify_no_mismatch_first_contact(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """First-contact forces UNTRUSTED trust → no mismatch even if HIGH channel."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.80, label="injection", model="mock-model", latency_ms=2.0
+    )
+    result = await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "suspicious",
+            "source_id": "brand-new-user",
+            "channel_type": "test_chan",
+            "session_id": "new-session",
+        },
+    )
+    data = result.structured_content
+    # First contact → UNTRUSTED → not in (HIGH, MEDIUM) → no mismatch.
+    assert data["is_first_contact"] is True
+    assert data["content_source_mismatch"] is False
+    assert "new-session" not in srv._mismatch_sessions
+
+
+@pytest.mark.asyncio
+async def test_classify_mismatch_tags_session(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Mismatch with session_id adds session to _mismatch_sessions."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {"text": "seed", "source_id": "user", "channel_type": "test_chan"},
+    )
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.75, label="injection", model="mock-model", latency_ms=2.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "suspicious",
+            "source_id": "user",
+            "channel_type": "test_chan",
+            "session_id": "mismatch-session",
+        },
+    )
+    assert "mismatch-session" in srv._mismatch_sessions
+
+
+@pytest.mark.asyncio
+async def test_classify_mismatch_no_session_id_no_tag(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Mismatch without session_id: response flag set, but no session tagged."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {"text": "seed", "source_id": "user", "channel_type": "test_chan"},
+    )
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.75, label="injection", model="mock-model", latency_ms=2.0
+    )
+    result = await srv.mcp.call_tool(
+        "classify",
+        {"text": "suspicious", "source_id": "user", "channel_type": "test_chan"},
+    )
+    # Mismatch is detected and returned in response.
+    assert result.structured_content["content_source_mismatch"] is True
+    # But no session was provided to tag.
+    assert len(srv._mismatch_sessions) == 0
+
+
+@pytest.mark.asyncio
+async def test_classify_mismatch_audit_event_written(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Mismatch writes a trust_update audit event with reason=content_source_mismatch."""
+    import json
+
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "seed",
+            "source_id": "audit-user",
+            "channel_type": "test_chan",
+            "session_id": "audit-sess",
+        },
+    )
+
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.75, label="injection", model="mock-model", latency_ms=2.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "suspicious",
+            "source_id": "audit-user",
+            "channel_type": "test_chan",
+            "session_id": "audit-sess",
+        },
+    )
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="trust_update")
+    mismatch_events = [
+        e
+        for e in events
+        if json.loads(e["details_json"]).get("reason") == "content_source_mismatch"
+    ]
+    assert len(mismatch_events) == 1
+    ev = mismatch_events[0]
+    details = json.loads(ev["details_json"])
+    assert ev["trust_level"] == "low"
+    assert details["previous_trust"] == "high"
+    assert details["new_trust"] == "low"
+    assert details["reason"] == "content_source_mismatch"
+    assert details["score"] == pytest.approx(0.75)
+
+
+@pytest.mark.asyncio
+async def test_gate_mismatch_session_forces_effective_trust_to_low(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Injecting a session into _mismatch_sessions → gate effective_trust=low."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    srv._mismatch_sessions.add("mismatch-gate-session")
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send an email",
+            "action_type": "send_email",
+            "session_id": "mismatch-gate-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    assert data["content_source_mismatch"] is True
+    assert data["trust_level"] == "high"  # original channel-resolved
+    assert data["effective_trust_level"] == "low"  # forced to LOW by mismatch
+    # send_email HIGH risk + LOW trust → block
+    assert data["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_gate_mismatch_medium_trust_forces_to_low(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """MEDIUM trust session with mismatch → effective_trust=low (same single-tier result)."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "medium")
+    srv.init_server(cfg)
+
+    srv._mismatch_sessions.add("med-mismatch-session")
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send an email",
+            "action_type": "send_email",
+            "session_id": "med-mismatch-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    assert data["content_source_mismatch"] is True
+    assert data["trust_level"] == "medium"
+    assert data["effective_trust_level"] == "low"
+    assert data["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_gate_mismatch_stacks_with_elevated_scrutiny(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Both mismatch (→ LOW) and elevated_scrutiny (→ one tier down) → UNTRUSTED."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    # Both flags set for the same session.
+    srv._mismatch_sessions.add("stacked-session")
+    srv._elevated_sessions.add("stacked-session")
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "read calendar",
+            "action_type": "calendar_read",
+            "session_id": "stacked-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    assert data["content_source_mismatch"] is True
+    assert data["elevated_scrutiny"] is True
+    assert data["trust_level"] == "high"  # original
+    # mismatch → LOW, then elevated_scrutiny downgrade_trust(LOW) → UNTRUSTED
+    assert data["effective_trust_level"] == "untrusted"
+    # calendar_read LOW risk + UNTRUSTED trust → prompt_user
+    assert data["recommendation"] == "prompt_user"
+
+
+@pytest.mark.asyncio
+async def test_gate_mismatch_only_for_tagged_session(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Mismatch only affects the tagged session; other sessions are unaffected."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    srv._mismatch_sessions.add("mismatch-session")
+
+    # Clean session: HIGH trust → allow for send_email HIGH risk? No: HIGH+HIGH=allow.
+    result_clean = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "clean-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    d_clean = result_clean.structured_content
+    assert d_clean["content_source_mismatch"] is False
+    assert d_clean["effective_trust_level"] == "high"
+    assert d_clean["recommendation"] == "allow"
+
+    # Mismatch session: forced to LOW → send_email HIGH+LOW → block.
+    result_mismatch = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "mismatch-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    d_mismatch = result_mismatch.structured_content
+    assert d_mismatch["content_source_mismatch"] is True
+    assert d_mismatch["effective_trust_level"] == "low"
+    assert d_mismatch["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_gate_mismatch_audit_records_content_source_mismatch(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Gate audit event details include content_source_mismatch=True."""
+    import json
+
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    srv._mismatch_sessions.add("mismatch-audit-session")
+
+    await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "mismatch-audit-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="action_gate")
+    assert len(events) == 1
+    details = json.loads(events[0]["details_json"])
+    assert details["content_source_mismatch"] is True
+    assert details["original_trust_level"] == "high"
+    # effective trust is LOW (mismatch), stored as top-level trust_level
+    assert events[0]["trust_level"] == "low"
+
+
+@pytest.mark.asyncio
+async def test_classify_mismatch_e2e_gate_uses_low_trust(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Full flow: classify detects mismatch → gate uses LOW effective trust."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    # Seed: register contact so second call is not first-contact.
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.0, label="benign", model="mock-model", latency_ms=1.0
+    )
+    await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "normal message",
+            "source_id": "trusted-user",
+            "channel_type": "test_chan",
+        },
+    )
+
+    # Classify with mismatch-triggering score: ≥ base_flag (0.70), < eff_flag (0.80).
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.75, label="injection", model="mock-model", latency_ms=2.0
+    )
+    classify_result = await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "suspicious injection attempt",
+            "source_id": "trusted-user",
+            "channel_type": "test_chan",
+            "session_id": "e2e-mismatch-session",
+        },
+    )
+    c_data = classify_result.structured_content
+    assert c_data["decision"] == "pass"  # passes effective threshold
+    assert c_data["content_source_mismatch"] is True
+    assert "e2e-mismatch-session" in srv._mismatch_sessions
+
+    # Gate call: effective trust should be LOW due to mismatch.
+    gate_result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "e2e-mismatch-session",
+            "source_id": "trusted-user",
+            "channel_type": "test_chan",
+        },
+    )
+    g_data = gate_result.structured_content
+    assert g_data["trust_level"] == "high"
+    assert g_data["effective_trust_level"] == "low"
+    assert g_data["content_source_mismatch"] is True
+    # send_email HIGH risk + LOW trust → block
+    assert g_data["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_init_server_resets_mismatch_sessions(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """init_server() clears _mismatch_sessions to ensure clean state on restart."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    # Manually add a stale session.
+    srv._mismatch_sessions.add("stale-session")
+    assert "stale-session" in srv._mismatch_sessions
+
+    # Re-init should clear it.
+    srv.init_server(cfg)
+    assert len(srv._mismatch_sessions) == 0

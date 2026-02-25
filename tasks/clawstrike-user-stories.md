@@ -215,15 +215,15 @@ Note: should not be possible by default unless config file exists and allows thi
 
 ---
 
-### US-016: Content-Source Mismatch Detection
+### US-016: Content-Source Mismatch Detection ✅ DONE
 
 **Description:** As a ClawStrike user, I want ClawStrike to flag anomalous behavior when a high-trust contact sends content that looks like prompt injection so that potential account compromise is caught.
 
 **Acceptance Criteria:**
-- [ ] If a contact has effective trust level `high` or `medium` AND the classifier score exceeds the *base* `flag` threshold (before trust modulation), a content-source mismatch is detected
-- [ ] The session's effective trust level is temporarily downgraded to `low` for all subsequent gating recommendations in this session
-- [ ] The audit log records the mismatch event with `event_type: "trust_update"` and a `reason: "content_source_mismatch"` field
-- [ ] The downgrade does not persist beyond the current session — the contact's stored trust level is unchanged
+- [x] If a contact has effective trust level `high` or `medium` AND the classifier score exceeds the *base* `flag` threshold (before trust modulation), a content-source mismatch is detected
+- [x] The session's effective trust level is temporarily downgraded to `low` for all subsequent gating recommendations in this session
+- [x] The audit log records the mismatch event with `event_type: "trust_update"` and a `reason: "content_source_mismatch"` field
+- [x] The downgrade does not persist beyond the current session — the contact's stored trust level is unchanged
 
 ---
 
