@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import csv
 import json
+import sqlite3
 from pathlib import Path
 from unittest.mock import MagicMock, patch
 
@@ -432,3 +434,390 @@ def test_confirm_invalid_json_exits_1(tmp_path: Path) -> None:
 
     assert result.exit_code == 1
     assert "Invalid JSON" in result.output
+
+
+# ---------------------------------------------------------------------------
+# US-028 — `clawstrike logs --export csv --output <path>`
+# ---------------------------------------------------------------------------
+
+
+def _seed_db(db_path: Path, events: list[dict]) -> None:
+    """Create the audit DB and insert synthetic events for testing."""
+    from clawstrike.db import setup_audit_db
+
+    setup_audit_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        for ev in events:
+            conn.execute(
+                "INSERT INTO audit_events "
+                "(timestamp, event_type, session_id, source_id, channel_type, "
+                "decision, score, is_first_contact, trust_level, details_json) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                (
+                    ev.get("timestamp", "2026-02-26T12:00:00+00:00"),
+                    ev.get("event_type", "input_classification"),
+                    ev.get("session_id", "sess-1"),
+                    ev.get("source_id", "user@example.com"),
+                    ev.get("channel_type", "email_body"),
+                    ev.get("decision", "pass"),
+                    ev.get("score", 0.1),
+                    ev.get("is_first_contact", 0),
+                    ev.get("trust_level", "auto"),
+                    ev.get("details_json", "{}"),
+                ),
+            )
+        conn.commit()
+
+
+def _read_csv(path: Path) -> tuple[list[str], list[dict]]:
+    """Return (headers, rows) from a CSV file."""
+    with path.open(newline="", encoding="utf-8") as f:
+        reader = csv.DictReader(f)
+        headers = list(reader.fieldnames or [])
+        rows = list(reader)
+    return headers, rows
+
+
+def test_logs_export_csv_creates_file(tmp_path: Path) -> None:
+    """--export csv --output creates the output file with audit events."""
+    db_path = tmp_path / "audit.db"
+    _seed_db(db_path, [{"event_type": "input_classification", "decision": "pass"}])
+
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+
+    result = runner.invoke(
+        app,
+        ["logs", "--export", "csv", "--output", str(out), "--config", str(cfg_file)],
+    )
+
+    assert result.exit_code == 0, result.output
+    assert out.exists()
+
+
+def test_logs_export_csv_headers_match_audit_fields(tmp_path: Path) -> None:
+    """CSV headers must match the AUDIT_EVENT_FIELDS constant."""
+    from clawstrike.db import AUDIT_EVENT_FIELDS
+
+    db_path = tmp_path / "audit.db"
+    _seed_db(db_path, [{}])
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+
+    runner.invoke(
+        app,
+        ["logs", "--export", "csv", "--output", str(out), "--config", str(cfg_file)],
+    )
+
+    headers, _ = _read_csv(out)
+    assert headers == AUDIT_EVENT_FIELDS
+
+
+def test_logs_export_csv_prints_event_count(tmp_path: Path) -> None:
+    """On completion, stdout includes the count of exported events."""
+    db_path = tmp_path / "audit.db"
+    _seed_db(db_path, [{}, {}, {}])  # 3 events
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+
+    result = runner.invoke(
+        app,
+        ["logs", "--export", "csv", "--output", str(out), "--config", str(cfg_file)],
+    )
+
+    assert result.exit_code == 0
+    assert "3" in result.output
+    assert str(out) in result.output
+
+
+def test_logs_export_csv_overwrites_after_confirm(tmp_path: Path) -> None:
+    """When the output file already exists and the user confirms, it is overwritten."""
+    db_path = tmp_path / "audit.db"
+    _seed_db(db_path, [{"event_type": "action_gate"}])
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+    out.write_text("old content")  # pre-existing file
+
+    result = runner.invoke(
+        app,
+        ["logs", "--export", "csv", "--output", str(out), "--config", str(cfg_file)],
+        input="y\n",  # confirm overwrite
+    )
+
+    assert result.exit_code == 0
+    # File should now contain CSV, not the old content.
+    content = out.read_text()
+    assert "id" in content  # CSV header present
+
+
+def test_logs_export_csv_aborts_when_overwrite_denied(tmp_path: Path) -> None:
+    """When the user declines the overwrite prompt, the command exits 0 and file is unchanged."""
+    db_path = tmp_path / "audit.db"
+    _seed_db(db_path, [{}])
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+    out.write_text("original")
+
+    result = runner.invoke(
+        app,
+        ["logs", "--export", "csv", "--output", str(out), "--config", str(cfg_file)],
+        input="n\n",  # deny overwrite
+    )
+
+    assert result.exit_code == 0
+    assert out.read_text() == "original"
+    assert "Aborted" in result.output
+
+
+def test_logs_no_export_flag_exits_1(tmp_path: Path) -> None:
+    """Calling logs without --export should exit 1 with a helpful message."""
+    cfg_file = write_yaml(tmp_path, minimal_config())
+
+    result = runner.invoke(app, ["logs", "--config", str(cfg_file)])
+
+    assert result.exit_code == 1
+    assert "csv" in result.output.lower()
+
+
+def test_logs_invalid_export_format_exits_1(tmp_path: Path) -> None:
+    """An unsupported --export format exits 1."""
+    cfg_file = write_yaml(tmp_path, minimal_config())
+    out = tmp_path / "export.json"
+
+    result = runner.invoke(
+        app,
+        ["logs", "--export", "json", "--output", str(out), "--config", str(cfg_file)],
+    )
+
+    assert result.exit_code == 1
+    assert "json" in result.output.lower()
+
+
+def test_logs_missing_output_exits_1(tmp_path: Path) -> None:
+    """--export without --output exits 1."""
+    cfg_file = write_yaml(tmp_path, minimal_config())
+
+    result = runner.invoke(app, ["logs", "--export", "csv", "--config", str(cfg_file)])
+
+    assert result.exit_code == 1
+    assert "--output" in result.output
+
+
+def test_logs_invalid_last_duration_exits_1(tmp_path: Path) -> None:
+    """Invalid --last value exits 1 with an error message."""
+    cfg_file = write_yaml(tmp_path, minimal_config())
+    out = tmp_path / "export.csv"
+
+    result = runner.invoke(
+        app,
+        [
+            "logs",
+            "--export",
+            "csv",
+            "--output",
+            str(out),
+            "--last",
+            "bad",
+            "--config",
+            str(cfg_file),
+        ],
+    )
+
+    assert result.exit_code == 1
+    assert "bad" in result.output
+
+
+def test_logs_filter_by_source(tmp_path: Path) -> None:
+    """--source filters events to only those matching the source ID."""
+    db_path = tmp_path / "audit.db"
+    _seed_db(
+        db_path,
+        [
+            {"source_id": "alice@example.com"},
+            {"source_id": "bob@example.com"},
+        ],
+    )
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+
+    runner.invoke(
+        app,
+        [
+            "logs",
+            "--export",
+            "csv",
+            "--output",
+            str(out),
+            "--source",
+            "alice@example.com",
+            "--config",
+            str(cfg_file),
+        ],
+    )
+
+    _, rows = _read_csv(out)
+    assert all(r["source_id"] == "alice@example.com" for r in rows)
+    assert len(rows) == 1
+
+
+def test_logs_filter_by_event_type(tmp_path: Path) -> None:
+    """--event-type filters events to only those with matching event_type."""
+    db_path = tmp_path / "audit.db"
+    _seed_db(
+        db_path,
+        [
+            {"event_type": "input_classification"},
+            {"event_type": "action_gate"},
+            {"event_type": "input_classification"},
+        ],
+    )
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+
+    runner.invoke(
+        app,
+        [
+            "logs",
+            "--export",
+            "csv",
+            "--output",
+            str(out),
+            "--event-type",
+            "action_gate",
+            "--config",
+            str(cfg_file),
+        ],
+    )
+
+    _, rows = _read_csv(out)
+    assert len(rows) == 1
+    assert rows[0]["event_type"] == "action_gate"
+
+
+def test_logs_filter_by_decision(tmp_path: Path) -> None:
+    """--decision filters events to only those with the given decision."""
+    db_path = tmp_path / "audit.db"
+    _seed_db(
+        db_path,
+        [
+            {"decision": "pass"},
+            {"decision": "block"},
+            {"decision": "pass"},
+        ],
+    )
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+
+    runner.invoke(
+        app,
+        [
+            "logs",
+            "--export",
+            "csv",
+            "--output",
+            str(out),
+            "--decision",
+            "block",
+            "--config",
+            str(cfg_file),
+        ],
+    )
+
+    _, rows = _read_csv(out)
+    assert len(rows) == 1
+    assert rows[0]["decision"] == "block"
+
+
+def test_logs_filter_by_last(tmp_path: Path) -> None:
+    """--last filters out events older than the specified duration."""
+    db_path = tmp_path / "audit.db"
+    _seed_db(
+        db_path,
+        [
+            # Old event — outside any recent window.
+            {"timestamp": "2020-01-01T00:00:00+00:00", "event_type": "old_event"},
+            # Recent event — within 1 hour.
+            {"timestamp": "2026-02-26T12:00:00+00:00", "event_type": "recent_event"},
+        ],
+    )
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+
+    runner.invoke(
+        app,
+        [
+            "logs",
+            "--export",
+            "csv",
+            "--output",
+            str(out),
+            "--last",
+            "1h",
+            "--config",
+            str(cfg_file),
+        ],
+    )
+
+    _, rows = _read_csv(out)
+    assert all(r["event_type"] == "recent_event" for r in rows)
+
+
+def test_logs_export_empty_db_creates_headers_only(tmp_path: Path) -> None:
+    """Exporting from an empty (no events) DB writes just the header row."""
+    db_path = tmp_path / "audit.db"
+    from clawstrike.db import setup_audit_db
+
+    setup_audit_db(db_path)
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+    out = tmp_path / "export.csv"
+
+    result = runner.invoke(
+        app,
+        ["logs", "--export", "csv", "--output", str(out), "--config", str(cfg_file)],
+    )
+
+    assert result.exit_code == 0
+    assert "0" in result.output
+    headers, rows = _read_csv(out)
+    assert headers  # headers are present
+    assert rows == []  # no data rows
+
+
+def test_logs_nonexistent_db_exports_zero_events(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """When the configured DB file does not exist, export succeeds with 0 events."""
+    monkeypatch.chdir(tmp_path)  # ensure no stray clawstrike.yaml is picked up
+    missing_db = tmp_path / "nonexistent.db"
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(missing_db)}})
+    )
+    out = tmp_path / "export.csv"
+
+    result = runner.invoke(
+        app,
+        ["logs", "--export", "csv", "--output", str(out), "--config", str(cfg_file)],
+    )
+
+    assert result.exit_code == 0
+    assert "0" in result.output

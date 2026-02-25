@@ -376,16 +376,16 @@ Note: should not be possible by default unless config file exists and allows thi
 
 ---
 
-### US-028: Audit Log CLI — CSV Export
+### US-028: Audit Log CLI — CSV Export ✅ DONE
 
 **Description:** As a ClawStrike user, I want to export audit logs to CSV so that I can analyze them in external tools or share them with a security team.
 
 **Acceptance Criteria:**
-- [ ] `clawstrike logs --export csv --output ./audit-export.csv` writes matching events to the specified file
-- [ ] All query filters (time range, source, event type, decision) are applied before export
-- [ ] CSV headers match the audit log field names
-- [ ] If the output file already exists, ClawStrike prompts for overwrite confirmation
-- [ ] On completion, logs the number of events exported (e.g., `Exported 247 events to ./audit-export.csv`)
+- [x] `clawstrike logs --export csv --output ./audit-export.csv` writes matching events to the specified file
+- [x] All query filters (time range, source, event type, decision) are applied before export
+- [x] CSV headers match the audit log field names
+- [x] If the output file already exists, ClawStrike prompts for overwrite confirmation
+- [x] On completion, logs the number of events exported (e.g., `Exported 247 events to ./audit-export.csv`)
 
 ---
 

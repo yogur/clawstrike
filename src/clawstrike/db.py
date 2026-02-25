@@ -355,3 +355,71 @@ async def insert_audit_event(
         ),
     )
     await conn.commit()
+
+
+# ---------------------------------------------------------------------------
+# Audit Event Query (US-028)
+# ---------------------------------------------------------------------------
+
+#: Column order for CSV export — matches the DDL declaration order.
+AUDIT_EVENT_FIELDS: list[str] = [
+    "id",
+    "timestamp",
+    "event_type",
+    "session_id",
+    "source_id",
+    "channel_type",
+    "decision",
+    "score",
+    "is_first_contact",
+    "trust_level",
+    "details_json",
+    "label",
+    "raw_input_hash",
+    "raw_input_snippet",
+]
+
+
+def query_audit_events(
+    path: str | Path,
+    *,
+    since: datetime | None = None,
+    source_id: str | None = None,
+    event_type: str | None = None,
+    decision: str | None = None,
+) -> list[dict]:
+    """Query audit events synchronously with optional filters.
+
+    Returns rows as plain dicts with keys matching ``AUDIT_EVENT_FIELDS``.
+    If the database file does not exist, returns an empty list.
+    Results are ordered by timestamp ascending.
+    """
+    db_path = Path(path)
+    if not db_path.exists():
+        return []
+
+    conditions: list[str] = []
+    params: list[object] = []
+
+    if since is not None:
+        conditions.append("timestamp >= ?")
+        params.append(since.isoformat())
+    if source_id is not None:
+        conditions.append("source_id = ?")
+        params.append(source_id)
+    if event_type is not None:
+        conditions.append("event_type = ?")
+        params.append(event_type)
+    if decision is not None:
+        conditions.append("decision = ?")
+        params.append(decision)
+
+    where = f" WHERE {' AND '.join(conditions)}" if conditions else ""
+    sql = f"SELECT * FROM audit_events{where} ORDER BY timestamp ASC"
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(sql, params)
+        rows = cursor.fetchall()
+
+    return [dict(row) for row in rows]

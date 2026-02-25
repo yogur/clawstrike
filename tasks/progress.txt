@@ -413,3 +413,23 @@
 - Allowlist check in `gate` uses a separate `open_db` call before the trust resolution pipeline. This keeps the allowlist check isolated and doesn't interfere with the existing trust/downgrade logic.
 - The E2E test pattern (gate→confirm→gate) is effective for verifying the full flow. Use `_make_cfg_with_trust` to set up channels that produce `prompt_user` for the initial gate call.
 ---
+
+## [2026-02-26] - US-028
+- Implemented `clawstrike logs --export csv --output <path>` with full filter support
+- Added `query_audit_events()` sync function to `db.py` using stdlib `sqlite3` (no event loop needed)
+- Exported `AUDIT_EVENT_FIELDS` constant from `db.py` so CLI and tests share the same column order
+- Replaced the placeholder `logs` command in `cli.py` with a full implementation
+- Added `_parse_last_duration()` helper in `cli.py` to parse `24h`, `7d`, `30m` style strings into `timedelta`
+- Files changed:
+  - `src/clawstrike/db.py` — added `AUDIT_EVENT_FIELDS` list and `query_audit_events()` sync function
+  - `src/clawstrike/cli.py` — replaced `logs` placeholder; added imports (`csv`, `re`, `datetime`, `timedelta`, `UTC`)
+  - `tests/test_cli.py` — added 12 tests covering all acceptance criteria
+  - `tasks/clawstrike-user-stories.md` — marked US-028 complete
+- All 277 tests pass; ruff check and ruff format clean
+- **Learnings for future iterations:**
+  - For sync CLI read access to the audit DB, use `query_audit_events()` (stdlib sqlite3) — no async event loop needed; reserve `open_db` / `aiosqlite` for tool handlers that write within an async context
+  - Export `AUDIT_EVENT_FIELDS` from `db.py` as a module-level constant so both the CLI writer and test assertions reference the same authoritative column list — avoids drift
+  - `csv.DictWriter` writes `None` as the string "None"; preprocess rows to replace `None` with `""` for cleaner CSV output
+  - Typer's `CliRunner.invoke(..., input="y\n")` simulates stdin for `typer.confirm()` prompts — use this in tests for overwrite-confirmation flows
+  - Duration filter uses ISO string comparison in SQLite (`timestamp >= ?`) — works correctly because `datetime.now(UTC).isoformat()` and stored timestamps share the same `+00:00` UTC suffix, so lexicographic order equals chronological order
+---

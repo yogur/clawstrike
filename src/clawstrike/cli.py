@@ -3,8 +3,11 @@
 from __future__ import annotations
 
 import asyncio
+import csv
 import json
+import re
 import sys
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Annotated
 
@@ -230,11 +233,110 @@ def health(
 # ---------------------------------------------------------------------------
 
 
+_DURATION_RE = re.compile(r"^(\d+)([mhd])$")
+
+
+def _parse_last_duration(value: str) -> timedelta:
+    """Parse a duration string like '24h', '7d', or '30m' into a timedelta."""
+    m = _DURATION_RE.match(value.strip())
+    if not m:
+        raise ValueError(
+            f"Invalid duration '{value}'. Use format: <N>m, <N>h, or <N>d "
+            "(e.g. 30m, 24h, 7d)."
+        )
+    amount, unit = int(m.group(1)), m.group(2)
+    if unit == "m":
+        return timedelta(minutes=amount)
+    if unit == "h":
+        return timedelta(hours=amount)
+    return timedelta(days=amount)
+
+
 @app.command()
-def logs() -> None:
-    """Query the audit log (US-025 – US-028)."""
-    typer.echo("Not yet implemented.", err=True)
-    raise typer.Exit(code=1)
+def logs(
+    export: Annotated[
+        str | None,
+        typer.Option(
+            "--export", help="Export format. Currently only 'csv' is supported."
+        ),
+    ] = None,
+    output: Annotated[
+        Path | None,
+        typer.Option("--output", "-o", help="Output file path for --export."),
+    ] = None,
+    last: Annotated[
+        str | None,
+        typer.Option(
+            "--last", help="Filter to events in the last N units (e.g. 24h, 7d, 30m)."
+        ),
+    ] = None,
+    source: Annotated[
+        str | None,
+        typer.Option("--source", help="Filter by source ID (exact match)."),
+    ] = None,
+    event_type: Annotated[
+        str | None,
+        typer.Option("--event-type", help="Filter by event type."),
+    ] = None,
+    decision: Annotated[
+        str | None,
+        typer.Option("--decision", help="Filter by decision value."),
+    ] = None,
+    config: _ConfigOption = _DEFAULT_CONFIG_PATH,
+) -> None:
+    """Export audit log events to CSV."""
+    if export is None:
+        typer.echo(
+            "Specify --export csv --output <path> to export audit events.", err=True
+        )
+        raise typer.Exit(code=1)
+    if export.lower() != "csv":
+        typer.echo(
+            f"Unsupported export format '{export}'. Only 'csv' is supported.", err=True
+        )
+        raise typer.Exit(code=1)
+    if output is None:
+        typer.echo("--output is required when using --export.", err=True)
+        raise typer.Exit(code=1)
+
+    cfg = _load_cfg_or_defaults(config)
+
+    # Parse --last duration.
+    since_dt: datetime | None = None
+    if last is not None:
+        try:
+            since_dt = datetime.now(UTC) - _parse_last_duration(last)
+        except ValueError as exc:
+            typer.echo(str(exc), err=True)
+            raise typer.Exit(code=1) from exc
+
+    # Prompt for overwrite when the output file already exists.
+    if output.exists():
+        confirmed = typer.confirm(f"File '{output}' already exists. Overwrite?")
+        if not confirmed:
+            typer.echo("Aborted.")
+            raise typer.Exit(code=0)
+
+    from clawstrike.db import AUDIT_EVENT_FIELDS, query_audit_events
+
+    events = query_audit_events(
+        cfg.audit.db_path,
+        since=since_dt,
+        source_id=source,
+        event_type=event_type,
+        decision=decision,
+    )
+
+    output.parent.mkdir(parents=True, exist_ok=True)
+    with output.open("w", newline="", encoding="utf-8") as f:
+        writer = csv.DictWriter(f, fieldnames=AUDIT_EVENT_FIELDS, extrasaction="ignore")
+        writer.writeheader()
+        # Replace None with "" so the CSV doesn't contain literal "None" strings.
+        for row in events:
+            writer.writerow({k: ("" if v is None else v) for k, v in row.items()})
+
+    count = len(events)
+    typer.echo(f"Exported {count} events to {output}")
 
 
 @app.command()
