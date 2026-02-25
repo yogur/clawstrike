@@ -28,9 +28,11 @@ The full product specification is in `tasks/clawstrike-prd.md` and user stories 
 
 ```bash
 uv run pytest                # run all tests
-uv run ruff check --fix      # lint
+uv run ruff check --fix      # lint (auto-fix; never manually fix lint issues)
 uv run ruff format           # format (always use this, never manually reformat)
 ```
+
+Always run `uv run ruff check --fix` and `uv run ruff format` to let the tools auto-fix issues. Do not run the check-only variants (`ruff check` without `--fix`, `ruff format --check`) and then manually apply fixes.
 
 ## CLI Structure
 
