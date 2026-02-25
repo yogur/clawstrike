@@ -65,7 +65,7 @@ Skill Mode supports two invocation methods:
 
 For **MCP integration**, start ClawStrike with `clawstrike start` (or `fastmcp run`). The agent calls `classify` and `gate` as MCP tools. Set `mcp.enabled: true` (the default).
 
-For **CLI integration** (e.g., OpenClaw), the agent skill invokes `clawstrike classify --json ...` and `clawstrike gate --json ...` as shell commands. Each invocation is independent (one-shot); the model cold-starts on every call (~1–2s). Session-scoped features (`elevated_scrutiny`) are unavailable in CLI mode. Set `mcp.enabled: false` to prevent `clawstrike start` from starting an unused listener.
+For **CLI integration** (e.g., OpenClaw), the agent skill invokes `clawstrike classify --json ...`, `clawstrike gate --json ...`, and `clawstrike confirm --json ...` as shell commands. Each invocation is independent (one-shot); the model cold-starts on every call (~1–2s). Session-scoped features (`elevated_scrutiny`) are unavailable in CLI mode. Set `mcp.enabled: false` to prevent `clawstrike start` from starting an unused listener.
 
 ### 3.2 Proxy Mode (Enforcement) — Phase 1.5
 
@@ -89,6 +89,7 @@ For **CLI integration** (e.g., OpenClaw), the agent skill invokes `clawstrike cl
 │     ┌─────────────────┐                                             │
 │     │  classify tool   │                                            │
 │     │  gate tool       │                                            │
+│     │  confirm tool    │                                            │
 │     │  health tool     │                                            │
 │     ├─────────────────┤                                             │
 │     │  Core Modules:   │                                            │
@@ -123,7 +124,7 @@ For **CLI integration** (e.g., OpenClaw), the agent skill invokes `clawstrike cl
 
 ## 4. MVP Feature Set (Skill Mode)
 
-> **Scope:** All MVP features operate through the Skill Mode integration. ClawStrike runs as a local **MCP server** (via fastmcp, stdio transport). The ClawStrike skill installed in OpenClaw instructs the LLM to call ClawStrike's MCP tools (`classify`, `gate`) for classification, trust evaluation, and advisory action gating. All guardrail decisions are advisory — the LLM is instructed to comply but is not mechanically forced to. Enforcement-grade gating ships in Phase 1.5 (Proxy Mode).
+> **Scope:** All MVP features operate through the Skill Mode integration. ClawStrike runs as a local **MCP server** (via fastmcp, stdio transport). The ClawStrike skill installed in OpenClaw instructs the LLM to call ClawStrike's MCP tools (`classify`, `gate`, `confirm`) for classification, trust evaluation, advisory action gating, and confirmation recording. All guardrail decisions are advisory — the LLM is instructed to comply but is not mechanically forced to. Enforcement-grade gating ships in Phase 1.5 (Proxy Mode).
 
 ### 4.1 Prompt Injection Detection
 
@@ -276,13 +277,30 @@ Example: baseline `block` = 0.92. An untrusted source hits `block` at 0.82. A hi
 | **Medium** | Auto-allow | Auto-allow | Prompt user | Block |
 | **Low** | Auto-allow | Auto-allow | Auto-allow | Prompt user |
 
-"Prompt user" means the skill instructs the LLM to pause and ask the owner for confirmation via the originating channel, including the action description, source information, and a one-tap approve/deny response. "Block" means the skill instructs the LLM not to proceed. In both cases, compliance depends on the LLM following the skill's instructions.
+"Prompt user" means the skill instructs the LLM to pause and ask the owner for confirmation via the originating channel, including the action description, source information, and a one-tap approve/deny response. After the user responds, the skill calls the `confirm` MCP tool to record the decision and optionally create an allowlist rule (see Section 4.3.3). "Block" means the skill instructs the LLM not to proceed. In both cases, compliance depends on the LLM following the skill's instructions.
 
 > **Phase 1.5 upgrade:** In Proxy Mode, "Block" mechanically strips the tool call from the LLM response before it reaches OpenClaw's executor, and "Prompt user" holds the response until approval is received. No LLM compliance required.
 
 #### 4.3.3 Action Allowlisting (Learn Over Time)
 
-When a user approves a prompted action, they can optionally mark it as "always allow for this source" or "always allow globally." This creates a stored policy rule.
+When a user approves a prompted action, they can optionally mark it as "always allow for this source" or "always allow globally." The user's decision is recorded via the `confirm` MCP tool, which creates a stored policy rule when the user selects an "always allow" option.
+
+**Confirm tool (Skill Mode):**
+
+The `confirm` MCP tool is a stateless endpoint that records the user's confirmation decision and optionally creates allowlist rules. The skill calls it after the user responds to a `prompt_user` recommendation from `gate`. The skill re-sends the full action context (action_type, source_id, session_id, channel_type) along with the user's decision.
+
+| Decision | Shortcut | Behavior |
+|----------|----------|----------|
+| `approve` | `a` | Allow this action once. No allowlist rule created. |
+| `deny` | `d` | Deny this action. Skill instructs the LLM to abandon. |
+| `always_allow` | `aa` | Allow and create a source-scoped allowlist rule. |
+| `always_allow_global` | `aag` | Allow and create a global allowlist rule (any source). |
+
+When `action_gating.allowlist_learning` is `false`, `always_allow` and `always_allow_global` are silently downgraded to `approve` (no rule is created).
+
+**Advisory limitation:** Like `classify` and `gate`, the `confirm` tool depends on the LLM actually calling it. A prompt injection could instruct the LLM to skip confirmation or fabricate a decision. The audit log captures what was reported, providing data to assess compliance gaps.
+
+**Allowlist schema:**
 
 ```sql
 CREATE TABLE action_allowlist (
@@ -294,6 +312,10 @@ CREATE TABLE action_allowlist (
     created_by    TEXT NOT NULL          -- "owner" (manual approval)
 );
 ```
+
+**Allowlist lookup in `gate`:** On each `gate` call, the allowlist is checked before applying the decision matrix. A match occurs when `action_type` matches exactly AND (`source_scope` is `"global"` OR `source_scope` matches the current `source_id`). Matched actions return `recommendation: "allow"` immediately with `allowlisted: true` and the matching `allowlist_rule_id` in the response. The audit event for auto-allowed actions references the rule ID.
+
+**`action_pattern` (deferred):** The column exists for forward compatibility. Pattern-based matching (regex/glob on action descriptions or arguments) is deferred to a future version; the current implementation only matches on `action_type` exactly.
 
 Over time, the gating becomes less intrusive for the user's normal workflows while maintaining strict controls for novel or untrusted actions.
 
@@ -498,7 +520,7 @@ clawstrike:
 - **MCP server:** fastmcp v3 (MCP tool interface for OpenClaw integration, stdio transport)
 - **Classifier inference:** Hugging Face Transformers + PyTorch (model loading, tokenization, inference)
 - **Data storage:** SQLite via aiosqlite (contact registry, audit log, action allowlist)
-- **CLI:** Typer (commands: `start`, `logs`, `allowlist`, `trust`, `block`)
+- **CLI:** Typer (commands: `start`, `classify`, `gate`, `confirm`, `health`, `logs`, `allowlist`, `trust`, `block`)
 - **Configuration:** Pydantic v2 + PyYAML (typed config schema with validation)
 - **Logging:** structlog (structured JSON logging, pairs with audit events)
 - **Testing:** pytest + pytest-asyncio (unit, integration, E2E)
