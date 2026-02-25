@@ -114,3 +114,25 @@ def apply_decision_matrix(risk_level: str, trust_level: TrustLevel) -> str:
     Returns one of: ``"allow"``, ``"block"``, ``"prompt_user"``.
     """
     return _MATRIX[risk_level][trust_level]
+
+
+# ---------------------------------------------------------------------------
+# Trust-level downgrade for elevated scrutiny (US-022)
+# ---------------------------------------------------------------------------
+
+_TRUST_DOWNGRADE: dict[TrustLevel, TrustLevel] = {
+    TrustLevel.HIGH: TrustLevel.MEDIUM,
+    TrustLevel.MEDIUM: TrustLevel.LOW,
+    TrustLevel.LOW: TrustLevel.UNTRUSTED,
+    TrustLevel.UNTRUSTED: TrustLevel.UNTRUSTED,
+}
+
+
+def downgrade_trust(trust_level: TrustLevel) -> TrustLevel:
+    """Downgrade *trust_level* by one tier for elevated-scrutiny sessions.
+
+    Ordering: HIGH → MEDIUM → LOW → UNTRUSTED (floor; stays at UNTRUSTED).
+    Called once per elevation source; stack multiple calls for stacked downgrades
+    (e.g. elevated scrutiny + content-source mismatch from US-016).
+    """
+    return _TRUST_DOWNGRADE[trust_level]

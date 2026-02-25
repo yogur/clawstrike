@@ -8,7 +8,7 @@ from __future__ import annotations
 import pytest
 
 from clawstrike.config import TrustLevel
-from clawstrike.gating import apply_decision_matrix, classify_action
+from clawstrike.gating import apply_decision_matrix, classify_action, downgrade_trust
 
 # ---------------------------------------------------------------------------
 # US-017 — Action Risk Taxonomy
@@ -129,3 +129,29 @@ def test_decision_matrix(
     risk_level: str, trust_level: TrustLevel, expected: str
 ) -> None:
     assert apply_decision_matrix(risk_level, trust_level) == expected
+
+
+# ---------------------------------------------------------------------------
+# US-022 — Trust-Level Downgrade for Elevated Scrutiny
+# ---------------------------------------------------------------------------
+
+
+def test_downgrade_high_to_medium() -> None:
+    assert downgrade_trust(TrustLevel.HIGH) == TrustLevel.MEDIUM
+
+
+def test_downgrade_medium_to_low() -> None:
+    assert downgrade_trust(TrustLevel.MEDIUM) == TrustLevel.LOW
+
+
+def test_downgrade_low_to_untrusted() -> None:
+    assert downgrade_trust(TrustLevel.LOW) == TrustLevel.UNTRUSTED
+
+
+def test_downgrade_untrusted_stays_untrusted() -> None:
+    assert downgrade_trust(TrustLevel.UNTRUSTED) == TrustLevel.UNTRUSTED
+
+
+def test_double_downgrade_stacks() -> None:
+    """Two successive downgrades apply two tiers (HIGH → LOW)."""
+    assert downgrade_trust(downgrade_trust(TrustLevel.HIGH)) == TrustLevel.LOW

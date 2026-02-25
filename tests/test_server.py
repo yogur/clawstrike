@@ -1543,3 +1543,271 @@ async def test_classify_audit_snippet_truncated_to_max_chars(
         str(cfg_trunc.audit.db_path), event_type="classify"
     )
     assert events[0]["raw_input_snippet"] == "a" * 10
+
+
+# ---------------------------------------------------------------------------
+# US-022 — Elevated Scrutiny Tightens Gating Recommendations
+# ---------------------------------------------------------------------------
+
+# Default config has owner_dm → HIGH trust (see default channel_defaults).
+# medium trust channel: email_body → LOW. Use a channel that maps to MEDIUM.
+# Check config defaults: the test cfg uses minimal_config which has no explicit
+# channel_defaults, so defaults apply. Let's use a channel that resolves to
+# a known trust level. Looking at the default config...
+# We'll inject a custom trust config to control the scenario precisely.
+
+
+def _make_cfg_with_trust(tmp_path: Path, channel: str, trust: str) -> ClawStrikeConfig:
+    """Return a config that maps *channel* to *trust* trust level."""
+    from clawstrike.config import load_config
+
+    data = minimal_config(
+        {
+            "audit": {"db_path": str(tmp_path / "us022.db")},
+            "trust": {
+                "channel_defaults": {channel: trust},
+            },
+        }
+    )
+    return load_config(write_yaml(tmp_path, data))
+
+
+@pytest.mark.asyncio
+async def test_gate_no_elevated_scrutiny_uses_original_trust(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Without elevated scrutiny, trust_level == effective_trust_level."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "medium")
+    srv.init_server(cfg)
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send an email",
+            "action_type": "send_email",
+            "session_id": "no-elev-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    assert data["elevated_scrutiny"] is False
+    assert data["trust_level"] == "medium"
+    assert data["effective_trust_level"] == "medium"
+    # send_email is HIGH risk + MEDIUM trust → prompt_user (from decision matrix)
+    assert data["recommendation"] == "prompt_user"
+
+
+@pytest.mark.asyncio
+async def test_gate_elevated_scrutiny_downgrades_trust_by_one_tier(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Elevated scrutiny downgrades MEDIUM → LOW, changing recommendation."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "medium")
+    srv.init_server(cfg)
+
+    # Manually inject the session into elevated_sessions (simulates prior classify flag).
+    srv._elevated_sessions.add("elev-session-1")
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send an email",
+            "action_type": "send_email",
+            "session_id": "elev-session-1",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    assert data["elevated_scrutiny"] is True
+    assert data["trust_level"] == "medium"  # original
+    assert data["effective_trust_level"] == "low"  # downgraded by one tier
+    # send_email is HIGH risk + LOW trust → block (stricter than prompt_user)
+    assert data["recommendation"] == "block"
+
+
+@pytest.mark.asyncio
+async def test_gate_elevated_scrutiny_high_trust_downgrades_to_medium(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """HIGH trust session with elevated scrutiny → effective trust is MEDIUM."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    srv._elevated_sessions.add("high-elev-session")
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send an email",
+            "action_type": "send_email",
+            "session_id": "high-elev-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    assert data["trust_level"] == "high"
+    assert data["effective_trust_level"] == "medium"
+    # send_email is HIGH risk + MEDIUM trust → prompt_user (was allow at high)
+    assert data["recommendation"] == "prompt_user"
+
+
+@pytest.mark.asyncio
+async def test_gate_elevated_scrutiny_untrusted_stays_untrusted(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """UNTRUSTED trust cannot be downgraded further; stays UNTRUSTED."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "untrusted")
+    srv.init_server(cfg)
+
+    srv._elevated_sessions.add("untrusted-elev-session")
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "read calendar",
+            "action_type": "calendar_read",
+            "session_id": "untrusted-elev-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data = result.structured_content
+    assert data["trust_level"] == "untrusted"
+    assert data["effective_trust_level"] == "untrusted"
+
+
+@pytest.mark.asyncio
+async def test_gate_elevated_scrutiny_audit_records_both_trust_tiers(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Audit log includes original_trust_level and elevated_scrutiny in details."""
+    import json
+
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "medium")
+    srv.init_server(cfg)
+
+    srv._elevated_sessions.add("audit-elev-session")
+
+    await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "audit-elev-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+
+    events = await _get_audit_events(str(cfg.audit.db_path), event_type="action_gate")
+    assert len(events) == 1
+    ev = events[0]
+    # effective trust (post-downgrade) is stored as the top-level trust_level column
+    assert ev["trust_level"] == "low"
+    details = json.loads(ev["details_json"])
+    assert details["original_trust_level"] == "medium"
+    assert details["elevated_scrutiny"] is True
+
+
+@pytest.mark.asyncio
+async def test_gate_elevated_scrutiny_only_for_tagged_session(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Elevation only applies to the tagged session_id, not others."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    srv._elevated_sessions.add("flagged-session")
+
+    # Non-elevated session: trust stays HIGH, send_email HIGH+HIGH → allow
+    result_normal = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "clean-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data_normal = result_normal.structured_content
+    assert data_normal["elevated_scrutiny"] is False
+    assert data_normal["effective_trust_level"] == "high"
+    assert data_normal["recommendation"] == "allow"
+
+    # Elevated session: trust drops to MEDIUM, send_email HIGH+MEDIUM → prompt_user
+    result_elev = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "flagged-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    data_elev = result_elev.structured_content
+    assert data_elev["elevated_scrutiny"] is True
+    assert data_elev["effective_trust_level"] == "medium"
+    assert data_elev["recommendation"] == "prompt_user"
+
+
+@pytest.mark.asyncio
+async def test_gate_elevated_via_classify_flag_end_to_end(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Full flow: classify sets elevated_scrutiny, gate uses downgraded trust."""
+    import clawstrike.mcpserver as srv
+
+    cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
+    srv.init_server(cfg)
+
+    # Trigger a flag decision via classify (score between flag and block thresholds).
+    # Default thresholds: flag=0.70, block=0.92. Use score=0.80.
+    reset_server_config.classify.return_value = ClassifierResult(
+        score=0.80, label="injection", model="mock-model", latency_ms=2.0
+    )
+    classify_result = await srv.mcp.call_tool(
+        "classify",
+        {
+            "text": "suspicious input",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+            "session_id": "e2e-session",
+        },
+    )
+    assert classify_result.structured_content["decision"] == "flag"
+    assert "e2e-session" in srv._elevated_sessions
+
+    # Now gate should see downgraded trust: HIGH → MEDIUM.
+    gate_result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "e2e-session",
+            "source_id": "user@example.com",
+            "channel_type": "test_chan",
+        },
+    )
+    gate_data = gate_result.structured_content
+    assert gate_data["trust_level"] == "high"
+    assert gate_data["effective_trust_level"] == "medium"
+    assert gate_data["elevated_scrutiny"] is True
+    # send_email HIGH risk + MEDIUM trust → prompt_user (stricter than allow at HIGH)
+    assert gate_data["recommendation"] == "prompt_user"

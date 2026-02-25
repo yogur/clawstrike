@@ -293,14 +293,14 @@ Note: should not be possible by default unless config file exists and allows thi
 
 ---
 
-### US-022: Elevated Scrutiny Tightens Gating Recommendations
+### US-022: Elevated Scrutiny Tightens Gating Recommendations ✅ DONE
 
 **Description:** As a ClawStrike user, I want flagged sessions (elevated scrutiny from prompt injection detection) to face stricter gating recommendations so that suspicious inputs can't easily trigger risky actions.
 
 **Acceptance Criteria:**
-- [ ] When a session is tagged `elevated_scrutiny` (from US-009), the effective trust level for gating is downgraded by one tier (high → medium, medium → low, low → untrusted)
-- [ ] The downgrade stacks with content-source mismatch downgrades (US-016): if both apply, both downgrades are applied in sequence
-- [ ] The effective trust tier used for gating is recorded in the audit log alongside the original trust tier
+- [x] When a session is tagged `elevated_scrutiny` (from US-009), the effective trust level for gating is downgraded by one tier (high → medium, medium → low, low → untrusted)
+- [x] The downgrade stacks with content-source mismatch downgrades (US-016): if both apply, both downgrades are applied in sequence
+- [x] The effective trust tier used for gating is recorded in the audit log alongside the original trust tier
 
 ---
 

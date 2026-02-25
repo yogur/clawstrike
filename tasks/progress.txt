@@ -318,3 +318,28 @@
   - `elevated_scrutiny` in audit details is a bool derived from `decision == "flag"` at write time — not from the in-memory `_elevated_sessions` set (which only tracks sessions by ID).
   - Tests for new audit fields that vary by `log_raw_input` config need a separate `cfg` with `log_raw_input: False` — create it inline with `load_config(write_yaml(tmp_path, data))` rather than using the shared `cfg` fixture.
 ---
+
+## [2026-02-25] - US-022
+- What was implemented:
+  - Added `downgrade_trust(trust_level) -> TrustLevel` pure function to `src/clawstrike/gating.py`
+    - Maps HIGH→MEDIUM, MEDIUM→LOW, LOW→UNTRUSTED, UNTRUSTED stays UNTRUSTED (floor)
+    - Designed to be called multiple times for stacked downgrades (US-016 will call it again)
+  - Updated `gate` tool in `src/clawstrike/mcpserver.py`:
+    - Checks `session_id in _elevated_sessions` to determine `elevated` flag
+    - Applies `downgrade_trust(base_trust_level)` when elevated to get `effective_trust_level`
+    - Uses `effective_trust_level` (not `base_trust_level`) for `apply_decision_matrix`
+    - Response now includes both `trust_level` (original) and `effective_trust_level` (post-downgrade)
+    - Audit event stores `effective_trust_level` as the top-level `trust_level` column; `details_json` includes `original_trust_level` and `elevated_scrutiny: bool`
+- Files changed:
+  - `src/clawstrike/gating.py` — added `_TRUST_DOWNGRADE` mapping and `downgrade_trust()` function
+  - `src/clawstrike/mcpserver.py` — imported `downgrade_trust`; updated `gate` tool logic + response + audit
+  - `tests/test_gating.py` — 5 unit tests for `downgrade_trust` (all 4 tiers + double-downgrade stack)
+  - `tests/test_server.py` — 7 integration tests for elevated scrutiny gating behavior
+  - `tasks/clawstrike-user-stories.md` — marked US-022 as DONE
+- **Learnings for future iterations:**
+  - `_elevated_sessions` is already populated by `classify` when decision=="flag" and session_id is non-empty; `gate` just reads from this set — no new global needed
+  - The gate response now has BOTH `trust_level` (original channel-resolved) AND `effective_trust_level` (after downgrade); the audit log stores effective as the top-level column and original in details
+  - `downgrade_trust` is designed to be called once per downgrade source — US-016 (content-source mismatch) will simply call it again on the already-downgraded result
+  - `_make_cfg_with_trust()` helper in test_server.py creates a config with a specific channel→trust mapping for scenario testing; use this pattern for future trust-related tests
+  - Avoid string annotations in test helpers (e.g., `-> "ClawStrikeConfig"`) — ruff UP037 flags them as fixable
+---
