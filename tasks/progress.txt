@@ -445,3 +445,15 @@
   - `tests/test_db.py` — removed migration import and test; renamed schema column test
 - 276 tests pass (net −1 from removed migration test); ruff check and ruff format clean
 ---
+
+## [2026-02-26] - Make classify session_id required
+- Removed the `= ""` default from `session_id` in the `classify` MCP tool — it is now a required parameter, consistent with `gate` and `confirm`
+- Callers wishing to disable session tagging should pass `session_id: ""` explicitly
+- Updated docstring for `session_id` param to reflect the new required status
+- Files changed:
+  - `src/clawstrike/mcpserver.py` — removed `= ""` default from `classify`'s `session_id` parameter; updated docstring
+  - `tests/test_server.py` — added `"session_id"` to `_CLASSIFY_ARGS` and all explicit classify call dicts; renamed `test_classify_session_not_tagged_without_session_id` → `test_classify_elevated_scrutiny_scoped_to_session`; renamed `test_classify_mismatch_no_session_id_no_tag` → `test_classify_mismatch_empty_session_id_no_tag` (both updated to pass `session_id: ""` when testing the no-tagging sentinel)
+  - `tests/test_cli.py` — added `"session_id"` to `_CLASSIFY_PARAMS`
+  - `CLAUDE.md` — updated classify response shapes pattern
+- 276 tests pass; ruff check and ruff format clean
+---

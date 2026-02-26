@@ -114,7 +114,7 @@ async def classify(
     text: str,
     source_id: str,
     channel_type: str,
-    session_id: str = "",
+    session_id: str,
 ) -> dict[str, Any]:
     """Classify inbound text for prompt injection.
 
@@ -124,9 +124,10 @@ async def classify(
                    (e.g. email address, Discord user ID).
         channel_type: Channel through which the message arrived
                       (e.g. ``owner_dm``, ``email_body``, ``webhook``).
-        session_id: Optional session identifier. When provided and the decision
-                    is ``flag``, the session is tagged for elevated scrutiny so
-                    that subsequent ``gate`` calls can apply stricter gating.
+        session_id: Session identifier. When the decision is ``flag``, the
+                    session is tagged for elevated scrutiny so that subsequent
+                    ``gate`` calls can apply stricter gating. Pass an empty
+                    string to disable session tagging.
 
     Returns:
         A dict with keys: decision (pass|flag|block), score (0.0–1.0),

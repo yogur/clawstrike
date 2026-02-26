@@ -246,6 +246,7 @@ _CLASSIFY_PARAMS = json.dumps(
         "text": "hello world",
         "source_id": "user@example.com",
         "channel_type": "email_body",
+        "session_id": "cli-test-session",
     }
 )
 

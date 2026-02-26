@@ -114,6 +114,7 @@ async def test_classify_returns_result(cfg: ClawStrikeConfig) -> None:
             "text": "Hello, what is the weather today?",
             "source_id": "user@example.com",
             "channel_type": "email_body",
+            "session_id": "test-session",
         },
     )
     data = result.structured_content
@@ -138,6 +139,7 @@ async def test_classify_echoes_source_metadata(cfg: ClawStrikeConfig) -> None:
             "text": "some text",
             "source_id": "discord:12345",
             "channel_type": "public_group",
+            "session_id": "test-session",
         },
     )
     data = result.structured_content
@@ -152,7 +154,12 @@ async def test_classify_raises_if_not_initialized() -> None:
     with pytest.raises(ToolError, match="not configured"):
         await srv.mcp.call_tool(
             "classify",
-            {"text": "x", "source_id": "s", "channel_type": "webhook"},
+            {
+                "text": "x",
+                "source_id": "s",
+                "channel_type": "webhook",
+                "session_id": "s",
+            },
         )
 
 
@@ -303,6 +310,7 @@ _CLASSIFY_ARGS = {
     "text": "test input",
     "source_id": "user@example.com",
     "channel_type": "email_body",
+    "session_id": "test-session",
 }
 
 
@@ -459,17 +467,17 @@ async def test_classify_no_session_tag_on_pass(
 
 
 @pytest.mark.asyncio
-async def test_classify_session_not_tagged_without_session_id(
+async def test_classify_elevated_scrutiny_scoped_to_session(
     cfg: ClawStrikeConfig, reset_server_config: MagicMock
 ) -> None:
-    """Flag classify without session_id does not pollute an arbitrary session."""
+    """Flag classify for session X does not elevate an unrelated session Y."""
     import clawstrike.mcpserver as srv
 
     reset_server_config.classify.return_value = ClassifierResult(
         score=_SCORE_FLAG, label="injection", model="mock-model", latency_ms=2.0
     )
     srv.init_server(cfg)
-    # classify without session_id (defaults to empty string — no tagging)
+    # classify tags "test-session" as elevated
     await srv.mcp.call_tool("classify", _CLASSIFY_ARGS)
     gate_result = await srv.mcp.call_tool(
         "gate",
@@ -528,7 +536,12 @@ async def test_classify_unknown_channel_trust_level_is_untrusted(
     srv.init_server(cfg)
     result = await srv.mcp.call_tool(
         "classify",
-        {"text": "hello", "source_id": "u", "channel_type": "unknown_channel"},
+        {
+            "text": "hello",
+            "source_id": "u",
+            "channel_type": "unknown_channel",
+            "session_id": "test-session",
+        },
     )
     assert result.structured_content["trust_level"] == "untrusted"
 
@@ -592,7 +605,12 @@ async def test_classify_untrusted_channel_blocks_at_effective_threshold(
     srv.init_server(cfg)
     result = await srv.mcp.call_tool(
         "classify",
-        {"text": "t", "source_id": "s", "channel_type": "webhook"},
+        {
+            "text": "t",
+            "source_id": "s",
+            "channel_type": "webhook",
+            "session_id": "test-session",
+        },
     )
     data = result.structured_content
     # webhook → UNTRUSTED, modifier block=-0.10 → eff_block=0.82 < 0.83 → block
@@ -620,7 +638,12 @@ async def test_classify_high_trust_raises_block_threshold(
     )
     await srv.mcp.call_tool(
         "classify",
-        {"text": "hello", "source_id": "owner", "channel_type": "owner_dm"},
+        {
+            "text": "hello",
+            "source_id": "owner",
+            "channel_type": "owner_dm",
+            "session_id": "seed-session",
+        },
     )
 
     # Now test threshold modulation on the second (known-contact) call.
@@ -629,7 +652,12 @@ async def test_classify_high_trust_raises_block_threshold(
     )
     result = await srv.mcp.call_tool(
         "classify",
-        {"text": "t", "source_id": "owner", "channel_type": "owner_dm"},
+        {
+            "text": "t",
+            "source_id": "owner",
+            "channel_type": "owner_dm",
+            "session_id": "test-session",
+        },
     )
     data = result.structured_content
     # owner_dm → HIGH, modifier block=+0.05 → eff_block=0.97 > 0.93 → not blocked
@@ -678,7 +706,12 @@ async def test_classify_first_contact_trust_level_is_untrusted(
     srv.init_server(cfg)
     result = await srv.mcp.call_tool(
         "classify",
-        {"text": "hi", "source_id": "new-owner", "channel_type": "owner_dm"},
+        {
+            "text": "hi",
+            "source_id": "new-owner",
+            "channel_type": "owner_dm",
+            "session_id": "test-session",
+        },
     )
     # owner_dm is normally HIGH, but first contact overrides to UNTRUSTED.
     assert result.structured_content["trust_level"] == "untrusted"
@@ -730,11 +763,21 @@ async def test_classify_two_source_ids_each_first_contact(
     srv.init_server(cfg)
     result_a = await srv.mcp.call_tool(
         "classify",
-        {"text": "hi", "source_id": "a@example.com", "channel_type": "email_body"},
+        {
+            "text": "hi",
+            "source_id": "a@example.com",
+            "channel_type": "email_body",
+            "session_id": "session-a",
+        },
     )
     result_b = await srv.mcp.call_tool(
         "classify",
-        {"text": "hi", "source_id": "b@example.com", "channel_type": "email_body"},
+        {
+            "text": "hi",
+            "source_id": "b@example.com",
+            "channel_type": "email_body",
+            "session_id": "session-b",
+        },
     )
     assert result_a.structured_content["is_first_contact"] is True
     assert result_b.structured_content["is_first_contact"] is True
@@ -1465,7 +1508,12 @@ async def test_classify_audit_stores_raw_input_snippet_when_log_raw_input_true(
     text = "hello world"
     await srv.mcp.call_tool(
         "classify",
-        {"text": text, "source_id": "s", "channel_type": "email_body"},
+        {
+            "text": text,
+            "source_id": "s",
+            "channel_type": "email_body",
+            "session_id": "test-session",
+        },
     )
 
     events = await _get_audit_events(str(cfg.audit.db_path), event_type="classify")
@@ -1499,7 +1547,12 @@ async def test_classify_audit_stores_only_hash_when_log_raw_input_false(
     text = "secret text"
     await srv.mcp.call_tool(
         "classify",
-        {"text": text, "source_id": "s", "channel_type": "email_body"},
+        {
+            "text": text,
+            "source_id": "s",
+            "channel_type": "email_body",
+            "session_id": "test-session",
+        },
     )
 
     events = await _get_audit_events(
@@ -1537,7 +1590,12 @@ async def test_classify_audit_snippet_truncated_to_max_chars(
     long_text = "a" * 50
     await srv.mcp.call_tool(
         "classify",
-        {"text": long_text, "source_id": "s", "channel_type": "email_body"},
+        {
+            "text": long_text,
+            "source_id": "s",
+            "channel_type": "email_body",
+            "session_id": "test-session",
+        },
     )
 
     events = await _get_audit_events(
@@ -1849,6 +1907,7 @@ async def test_classify_mismatch_detected_high_trust_pass_decision(
             "text": "hello",
             "source_id": "trusted-user",
             "channel_type": "test_chan",
+            "session_id": "seed-session",
         },
     )
 
@@ -1862,6 +1921,7 @@ async def test_classify_mismatch_detected_high_trust_pass_decision(
             "text": "suspicious content",
             "source_id": "trusted-user",
             "channel_type": "test_chan",
+            "session_id": "test-session",
         },
     )
     data = result.structured_content
@@ -1892,6 +1952,7 @@ async def test_classify_mismatch_detected_medium_trust(
             "text": "hello",
             "source_id": "medium-user",
             "channel_type": "test_chan",
+            "session_id": "seed-session",
         },
     )
 
@@ -1905,6 +1966,7 @@ async def test_classify_mismatch_detected_medium_trust(
             "text": "suspicious content",
             "source_id": "medium-user",
             "channel_type": "test_chan",
+            "session_id": "test-session",
         },
     )
     data = result.structured_content
@@ -1929,7 +1991,12 @@ async def test_classify_no_mismatch_score_below_base_flag(
     # Seed contact.
     await srv.mcp.call_tool(
         "classify",
-        {"text": "hi", "source_id": "user", "channel_type": "test_chan"},
+        {
+            "text": "hi",
+            "source_id": "user",
+            "channel_type": "test_chan",
+            "session_id": "seed-session",
+        },
     )
 
     reset_server_config.classify.return_value = ClassifierResult(
@@ -1937,7 +2004,12 @@ async def test_classify_no_mismatch_score_below_base_flag(
     )
     result = await srv.mcp.call_tool(
         "classify",
-        {"text": "normal text", "source_id": "user", "channel_type": "test_chan"},
+        {
+            "text": "normal text",
+            "source_id": "user",
+            "channel_type": "test_chan",
+            "session_id": "test-session",
+        },
     )
     assert result.structured_content["content_source_mismatch"] is False
 
@@ -1957,7 +2029,12 @@ async def test_classify_no_mismatch_low_trust_above_base_flag(
     )
     await srv.mcp.call_tool(
         "classify",
-        {"text": "hi", "source_id": "low-user", "channel_type": "test_chan"},
+        {
+            "text": "hi",
+            "source_id": "low-user",
+            "channel_type": "test_chan",
+            "session_id": "seed-session",
+        },
     )
 
     reset_server_config.classify.return_value = ClassifierResult(
@@ -1969,6 +2046,7 @@ async def test_classify_no_mismatch_low_trust_above_base_flag(
             "text": "suspicious",
             "source_id": "low-user",
             "channel_type": "test_chan",
+            "session_id": "test-session",
         },
     )
     assert result.structured_content["content_source_mismatch"] is False
@@ -2018,7 +2096,12 @@ async def test_classify_mismatch_tags_session(
     )
     await srv.mcp.call_tool(
         "classify",
-        {"text": "seed", "source_id": "user", "channel_type": "test_chan"},
+        {
+            "text": "seed",
+            "source_id": "user",
+            "channel_type": "test_chan",
+            "session_id": "seed-session",
+        },
     )
 
     reset_server_config.classify.return_value = ClassifierResult(
@@ -2037,10 +2120,10 @@ async def test_classify_mismatch_tags_session(
 
 
 @pytest.mark.asyncio
-async def test_classify_mismatch_no_session_id_no_tag(
+async def test_classify_mismatch_empty_session_id_no_tag(
     tmp_path: Path, reset_server_config: MagicMock
 ) -> None:
-    """Mismatch without session_id: response flag set, but no session tagged."""
+    """Mismatch with session_id="" (empty): response flag set, but no session tagged."""
     import clawstrike.mcpserver as srv
 
     cfg = _make_cfg_with_trust(tmp_path, "test_chan", "high")
@@ -2051,7 +2134,12 @@ async def test_classify_mismatch_no_session_id_no_tag(
     )
     await srv.mcp.call_tool(
         "classify",
-        {"text": "seed", "source_id": "user", "channel_type": "test_chan"},
+        {
+            "text": "seed",
+            "source_id": "user",
+            "channel_type": "test_chan",
+            "session_id": "seed-session",
+        },
     )
 
     reset_server_config.classify.return_value = ClassifierResult(
@@ -2059,11 +2147,16 @@ async def test_classify_mismatch_no_session_id_no_tag(
     )
     result = await srv.mcp.call_tool(
         "classify",
-        {"text": "suspicious", "source_id": "user", "channel_type": "test_chan"},
+        {
+            "text": "suspicious",
+            "source_id": "user",
+            "channel_type": "test_chan",
+            "session_id": "",
+        },
     )
     # Mismatch is detected and returned in response.
     assert result.structured_content["content_source_mismatch"] is True
-    # But no session was provided to tag.
+    # Empty session_id disables tagging.
     assert len(srv._mismatch_sessions) == 0
 
 
@@ -2313,6 +2406,7 @@ async def test_classify_mismatch_e2e_gate_uses_low_trust(
             "text": "normal message",
             "source_id": "trusted-user",
             "channel_type": "test_chan",
+            "session_id": "seed-session",
         },
     )
 
