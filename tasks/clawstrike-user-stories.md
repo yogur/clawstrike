@@ -39,16 +39,16 @@
 
 ---
 
-### US-003: ClawStrike OpenClaw Skill Definition
+### US-003: ClawStrike OpenClaw Skill Definition ✅ DONE
 
 **Description:** As a ClawStrike user, I want a ready-to-install OpenClaw skill file so that I can integrate ClawStrike with my OpenClaw instance without writing skill config myself.
 
 **Acceptance Criteria:**
-- [ ] The repository includes a `skills/clawstrike/` directory containing a complete OpenClaw skill definition
-- [ ] The skill's system prompt instructs the LLM to: (1) call `clawstrike classify --json ...` with all inbound messages before acting, (2) call `clawstrike gate --json ...` with planned actions before executing, and (3) comply with block/flag/prompt recommendations
-- [ ] The skill definition invokes ClawStrike via shell execution (OpenClaw does not support native MCP server connections)
-- [ ] The skill can be installed into OpenClaw via standard ClawHub installation or manual file copy
-- [ ] A README in the skill directory documents installation steps; recommends setting `mcp.enabled: false` in `clawstrike.yaml` for OpenClaw deployments
+- [x] The repository includes a `skills/clawstrike/` directory containing a complete OpenClaw skill definition
+- [x] The skill's system prompt instructs the LLM to: (1) call `clawstrike classify --json ...` with all inbound messages before acting, (2) call `clawstrike gate --json ...` with planned actions before executing, and (3) comply with block/flag/prompt recommendations
+- [x] The skill definition invokes ClawStrike via shell execution (OpenClaw does not support native MCP server connections)
+- [x] The skill can be installed into OpenClaw via standard ClawHub installation or manual file copy
+- [x] A README in the skill directory documents installation steps; recommends setting `mcp.enabled: false` in `clawstrike.yaml` for OpenClaw deployments
 
 ---
 
@@ -112,14 +112,14 @@
 
 ---
 
-### US-008: Block Threshold — Rejection Recommendation
+### US-008: Block Threshold — Rejection Recommendation ✅ DONE
 
 **Description:** As a ClawStrike user, I want messages scoring above the block threshold to be flagged for rejection so that high-confidence injection attempts are caught.
 
 **Acceptance Criteria:**
 - [x] When classifier score ≥ `threshold.block`, the `classify` MCP tool returns `{"decision": "block", "score": <float>, "label": "...", "reason": "prompt_injection_detected"}`
-- [ ] The ClawStrike skill, upon receiving a block recommendation, instructs the LLM to reject the input and not act on it
-- [ ] A notification is sent to the user via the originating channel stating the input was flagged and from which source
+- [x] The ClawStrike skill, upon receiving a block recommendation, instructs the LLM to reject the input and not act on it
+- [x] A notification is sent to the owner via **owner_dm** (not originating channel — avoids secondary injection vector) stating the input was flagged and from which source
 - [x] The event is written to the audit log with all fields populated (classifier score, source metadata, decision: "block")
 
 ---
@@ -266,9 +266,9 @@ Note: should not be possible by default unless config file exists and allows thi
 - [x] The `decision` parameter accepts: `"approve"` / `"a"`, `"deny"` / `"d"`, `"always_allow"` / `"aa"`, `"always_allow_global"` / `"aag"` (case-insensitive)
 - [x] Invalid `decision` values return a `ToolError` naming the valid options
 - [x] The tool returns `{"status": "recorded", "decision": "allow"|"deny", "user_decision": "<normalized>", "allowlist_created": bool, "allowlist_rule_id": int|null, ...}`
-- [ ] When the `gate` MCP tool returns `recommendation: "prompt_user"`, the ClawStrike skill instructs the LLM to ask the owner for confirmation before proceeding
-- [ ] The confirmation message includes: action description, source identifier, channel type, trust level, and risk level
-- [ ] If the user denies, the skill instructs the LLM to abandon the action
+- [x] When the `gate` MCP tool returns `recommendation: "prompt_user"`, the ClawStrike skill instructs the LLM to ask the owner for confirmation before proceeding
+- [x] The confirmation message includes: action description, source identifier, channel type, trust level, and risk level
+- [x] If the user denies, the skill instructs the LLM to abandon the action
 - [x] The audit log records the user's decision with `event_type: "action_confirm"` and `decision: "allow"` or `decision: "deny"`
 - [x] `clawstrike confirm --json '{...}'` provides the same functionality via CLI for non-MCP agents
 

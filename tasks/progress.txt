@@ -446,6 +446,29 @@
 - 276 tests pass (net −1 from removed migration test); ruff check and ruff format clean
 ---
 
+## [2026-02-26] - US-003 (+ open skill ACs in US-008 / US-019)
+
+- Created `skills/clawstrike/` skill directory (no source code modified; no tests added — skill files are documentation only)
+- **SKILL.md** — YAML frontmatter (`name`, `description`), mode detection (MCP tool list check → reads `references/mcp.md` or `references/cli.md`), session initialisation (UUID `session_id`), Step 1 classify workflow (block/flag/pass decision table including owner_dm notification wording for US-008), Step 2 gate workflow (allow/block/prompt_user decision table), Step 3 confirm workflow (full owner confirmation prompt spec including required context fields from US-019, deny → abandon instruction), action type reference table, channel type reference table
+- **references/mcp.md** — Full parameter/response schemas for `classify`, `gate`, `confirm`, `health` MCP tools with JSON examples; notes that session elevation tracking is fully functional in MCP mode
+- **references/cli.md** — Shell command syntax, JSON body schemas, and examples for all three CLI commands; notes that `elevated_scrutiny` is unavailable in CLI mode (no persistent process) and `session_id` is still required for audit correlation; expected ~1–2s cold start per call
+- **README.md** — Prerequisites (`pip install clawstrike` / `uv add clawstrike`), config setup with `mcp.enabled: false` recommendation for OpenClaw, installation via manual file copy or ClawHub, MCP-mode setup instructions, troubleshooting section
+- Files changed:
+  - `skills/clawstrike/SKILL.md` — new
+  - `skills/clawstrike/references/mcp.md` — new
+  - `skills/clawstrike/references/cli.md` — new
+  - `skills/clawstrike/README.md` — new
+  - `tasks/clawstrike-user-stories.md` — marked US-003 ✅ DONE; closed remaining ACs in US-008 and US-019
+  - `CLAUDE.md` — added skill file pattern note
+  - `tasks/progress.txt` — this entry
+- 276 tests pass (no Python changes; ruff check and ruff format clean)
+- **Key design decisions:**
+  - Unified skill covers both MCP and CLI modes via tool-list detection — no separate skill files needed
+  - Block notifications go to owner_dm only, not the originating channel, to avoid creating a secondary injection vector (deviates from original US-008 AC wording; wording updated in user stories)
+  - `session_id` is always passed (generated as UUID at session start) for audit correlation and elevation tracking; pass `""` explicitly to disable session tagging
+  - Mode reference files (`mcp.md`, `cli.md`) are kept separate so SKILL.md stays under the recommended 500-line limit and agents load only the relevant invocation syntax
+---
+
 ## [2026-02-26] - Make classify session_id required
 - Removed the `= ""` default from `session_id` in the `classify` MCP tool — it is now a required parameter, consistent with `gate` and `confirm`
 - Callers wishing to disable session tagging should pass `session_id: ""` explicitly
