@@ -26,6 +26,8 @@
 - Content-source mismatch (US-016): `_mismatch_sessions` global in `mcpserver.py` works like `_elevated_sessions`. Mismatch condition: `trust_level in (HIGH, MEDIUM) AND score >= base_flag` — fires independently of the effective decision (pass/flag/block). In `gate`, mismatch forces effective trust to LOW (applied BEFORE elevated_scrutiny downgrade). Teardown must clear both sets.
 - Allowlist check in `gate` runs BEFORE the decision matrix; if matched, `recommendation` is forced to `"allow"`. Response and audit event include `allowlisted: bool`, `allowlist_rule_id`, and `allowlist_source_scope`.
 - `confirm` tool uses `_DECISION_MAP` for case-insensitive normalization. `always_allow`/`always_allow_global` create allowlist rules only when `cfg.action_gating.allowlist_learning` is `True`; otherwise silently downgraded to `approve`.
+- Static allowlist rules (`ActionGatingConfig.static_rules`) are checked in `gate` after the DB allowlist; `allowlist_source: "db" | "config" | None` in the response and audit event identifies the rule origin. `list_allowlist_rules(path)` (sync, stdlib sqlite3) in `db.py` lists all DB rules for CLI display.
+- Typer sub-apps for grouped commands: `_sub = typer.Typer(help="...")` + `app.add_typer(_sub, name="cmd")` + `@_sub.command("subcommand")` → `clawstrike cmd subcommand`.
 - New CLI commands follow the same pattern: `--json` input, `init_server`, `asyncio.run(srv.<tool>(**params))`, `json.dumps` output.
 - Config-based contact trust overrides: `TrustConfig.contacts` maps `source_id` → `ContactOverrideLevel` ("trusted"|"blocked"). Checked at the TOP of `classify` before classifier invocation. Blocked → early return (no classifier call, still creates DB record). Trusted → `TrustLevel.HIGH` overrides first-contact and channel defaults. Both write `trust_update` audit events with `reason="config_override"`. `ContactOverrideLevel` is separate from `TrustLevel` — Pydantic rejects invalid values like "high"/"medium" at config load time.
 
@@ -527,4 +529,33 @@
   - `ContactOverrideLevel` is a separate StrEnum from `TrustLevel` — values "trusted"/"blocked" are NOT in `TrustLevel`. This correctly prevents using "high"/"medium" etc. as contact overrides (Pydantic rejects them at config load time).
   - The DB write block for "trusted" contacts inserts the trust_update event at the start of the same `open_db` context as the classify event and interaction tracking — all writes are atomic per request.
   - `make_cfg_with_contacts()` helper pattern: `tmp_path` + contacts dict + optional channel/channel_trust/db_name — reusable for all future tests needing contact overrides.
+---
+
+## [2026-03-01] - US-021
+
+- What was implemented:
+  - Added `StaticAllowlistRule` Pydantic model (`action_type: str`, `source_scope: str = "global"`) to `config.py`
+  - Added `static_rules: list[StaticAllowlistRule]` field to `ActionGatingConfig` (default empty list)
+  - In `gate` tool: DB allowlist is checked first; if no match, static config rules are checked with the same matching logic (exact `action_type` AND `source_scope == "global"` OR `source_scope == source_id`). New `allowlist_source: "db" | "config" | None` field in gate response and audit event details distinguishes rule origins.
+  - Added `list_allowlist_rules(path)` sync function to `db.py` (stdlib sqlite3, returns empty list if DB doesn't exist)
+  - Replaced placeholder `allowlist` command in `cli.py` with a Typer sub-app (`_allowlist_app`) and `allowlist list` subcommand. Output is a left-aligned table showing Source, ID, Action Type, Source Scope, Created columns. Config rules show `"-"` for ID and `"(static)"` for Created.
+  - Added `make_cfg_with_static_rules()` helper to `tests/test_server/helpers.py`
+  - 17 new tests (11 gate, 4 CLI)
+- Files changed:
+  - `src/clawstrike/config.py` — added `StaticAllowlistRule`, updated `ActionGatingConfig`
+  - `src/clawstrike/db.py` — added `list_allowlist_rules()`
+  - `src/clawstrike/mcpserver.py` — gate tool: static rule check, `allowlist_source` field in response and audit
+  - `src/clawstrike/cli.py` — replaced placeholder `allowlist` command with sub-app + `allowlist list`
+  - `tests/test_server/helpers.py` — added `make_cfg_with_static_rules()` helper
+  - `tests/test_server/test_gate.py` — 11 new tests (allowlist_source field, static rule matching, priority, audit)
+  - `tests/test_cli.py` — 4 new tests for `allowlist list`
+  - `tasks/clawstrike-user-stories.md` — marked US-021 as DONE
+  - `CLAUDE.md` — updated allowlist patterns
+- 292 tests pass; ruff check and ruff format clean
+- **Learnings for future iterations:**
+  - Typer sub-apps: `_sub = typer.Typer(help="...")` + `app.add_typer(_sub, name="subname")` + `@_sub.command("cmd")` enables `clawstrike subname cmd` syntax. The `name` in `add_typer` is what appears in CLI output.
+  - DB rules are checked before config rules in gate — this ensures dynamic rules (created by the user at runtime) take precedence over static config rules when both match the same action.
+  - Static config rules never get allowlist_rule_id (None) since they have no DB row — the `allowlist_source` field is the only way to distinguish them.
+  - `list_allowlist_rules` follows the same sync/stdlib pattern as `query_audit_events` — no event loop needed for read-only CLI access.
+  - `make_cfg_with_static_rules()` helper follows the same pattern as `make_cfg_with_trust()` and `make_cfg_with_contacts()` — minimal_config + extra dict + write_yaml + load_config.
 ---

@@ -116,6 +116,15 @@ class TrustConfig(BaseModel):
     contacts: dict[str, ContactOverrideLevel] = Field(default_factory=dict)
 
 
+class StaticAllowlistRule(BaseModel):
+    """A static allowlist rule defined in config (pre-approved action)."""
+
+    model_config = ConfigDict(extra="allow")
+
+    action_type: str
+    source_scope: str = "global"
+
+
 class ActionGatingConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
@@ -123,6 +132,7 @@ class ActionGatingConfig(BaseModel):
     confirmation_channel: str = "owner_dm"
     allowlist_learning: bool = True
     guard_allowlist_on_flag: bool = True
+    static_rules: list[StaticAllowlistRule] = Field(default_factory=list)
 
 
 class AuditConfig(BaseModel):

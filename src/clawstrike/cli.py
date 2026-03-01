@@ -353,8 +353,56 @@ def block() -> None:
     raise typer.Exit(code=1)
 
 
-@app.command()
-def allowlist() -> None:
-    """Manage the action allowlist."""
-    typer.echo("Not yet implemented.", err=True)
-    raise typer.Exit(code=1)
+_allowlist_app = typer.Typer(help="Manage the action allowlist (read-only).")
+app.add_typer(_allowlist_app, name="allowlist")
+
+
+@_allowlist_app.command("list")
+def allowlist_list(
+    config: _ConfigOption = _DEFAULT_CONFIG_PATH,
+) -> None:
+    """List all allowlist rules (static config rules and dynamic DB rules)."""
+    cfg = _load_cfg_or_defaults(config)
+
+    from clawstrike.db import list_allowlist_rules
+
+    db_rules = list_allowlist_rules(cfg.audit.db_path)
+    static_rules = cfg.action_gating.static_rules
+
+    rows: list[dict[str, str]] = []
+    for rule in static_rules:
+        rows.append(
+            {
+                "source": "config",
+                "id": "-",
+                "action_type": rule.action_type,
+                "source_scope": rule.source_scope,
+                "created": "(static)",
+            }
+        )
+    for rule in db_rules:
+        rows.append(
+            {
+                "source": "db",
+                "id": str(rule["id"]),
+                "action_type": rule["action_type"],
+                "source_scope": rule["source_scope"],
+                "created": rule["created_at"] or "",
+            }
+        )
+
+    if not rows:
+        typer.echo("No allowlist rules found.")
+        return
+
+    headers = ["Source", "ID", "Action Type", "Source Scope", "Created"]
+    keys = ["source", "id", "action_type", "source_scope", "created"]
+    widths = [len(h) for h in headers]
+    for row in rows:
+        for i, key in enumerate(keys):
+            widths[i] = max(widths[i], len(row[key]))
+
+    typer.echo("  ".join(h.ljust(widths[i]) for i, h in enumerate(headers)))
+    typer.echo("  ".join("-" * widths[i] for i in range(len(headers))))
+    for row in rows:
+        typer.echo("  ".join(row[key].ljust(widths[i]) for i, key in enumerate(keys)))

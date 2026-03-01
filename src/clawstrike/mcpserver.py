@@ -385,9 +385,11 @@ async def gate(
     base_trust_level = resolve_trust_level(channel_type, cfg.trust)
 
     # Check allowlist before applying the full gating pipeline.
+    # DB rules are checked first; static config rules are checked if no DB rule matched.
     allowlisted = False
     allowlist_rule_id = None
     allowlist_source_scope = None
+    allowlist_source: str | None = None  # "db" | "config" | None
     if _db_path:
         async with open_db(_db_path) as conn:
             rule = await check_allowlist(conn, action_type, source_id)
@@ -395,6 +397,19 @@ async def gate(
             allowlisted = True
             allowlist_rule_id = rule["id"]
             allowlist_source_scope = rule["source_scope"]
+            allowlist_source = "db"
+
+    # Check static config rules when no DB rule matched.
+    if not allowlisted:
+        for static_rule in cfg.action_gating.static_rules:
+            if static_rule.action_type == action_type and (
+                static_rule.source_scope == "global"
+                or static_rule.source_scope == source_id
+            ):
+                allowlisted = True
+                allowlist_source_scope = static_rule.source_scope
+                allowlist_source = "config"
+                break
 
     # Force effective trust to LOW when a content-source mismatch was detected
     # in a prior classify call for this session. Applied before the elevated-
@@ -441,6 +456,7 @@ async def gate(
                     "allowlisted": allowlisted,
                     "allowlist_rule_id": allowlist_rule_id,
                     "allowlist_source_scope": allowlist_source_scope,
+                    "allowlist_source": allowlist_source,
                 },
             )
 
@@ -454,6 +470,7 @@ async def gate(
         "content_source_mismatch": mismatch,
         "allowlisted": allowlisted,
         "allowlist_rule_id": allowlist_rule_id,
+        "allowlist_source": allowlist_source,
         "action_type": action_type,
         "session_id": session_id,
         "source_id": source_id,

@@ -15,7 +15,7 @@ import pytest
 
 from clawstrike.config import ClawStrikeConfig
 
-from .helpers import get_audit_events, make_cfg_with_trust
+from .helpers import get_audit_events, make_cfg_with_static_rules, make_cfg_with_trust
 
 # ---------------------------------------------------------------------------
 # Gate tool basic response shape
@@ -671,3 +671,224 @@ async def test_gate_allowlist_audit_includes_rule_id(
     details = json.loads(events[-1]["details_json"])
     assert details["allowlisted"] is True
     assert details["allowlist_rule_id"] == rule_id
+
+
+# ---------------------------------------------------------------------------
+# allowlist_source field — DB vs config rule distinction
+# ---------------------------------------------------------------------------
+
+
+async def test_gate_db_allowlist_source_is_db(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """A rule created via confirm tool shows allowlist_source='db'."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    await srv.mcp.call_tool("confirm", {**_CONFIRM_BASE, "decision": "always_allow"})
+
+    g = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "src-sess",
+            "source_id": "user@example.com",
+            "channel_type": "email_body",
+        },
+    )
+    data = g.structured_content
+    assert data["allowlisted"] is True
+    assert data["allowlist_source"] == "db"
+
+
+async def test_gate_no_allowlist_source_is_none(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """When not allowlisted, allowlist_source is None."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "read file",
+            "action_type": "file_read",
+            "session_id": "sess-x",
+            "source_id": "user@example.com",
+            "channel_type": "email_body",
+        },
+    )
+    assert result.structured_content["allowlist_source"] is None
+
+
+# ---------------------------------------------------------------------------
+# Static config rule matching in gate
+# ---------------------------------------------------------------------------
+
+
+async def test_gate_static_global_rule_allows_any_source(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """A global static config rule allows the action for any source_id."""
+    import clawstrike.mcpserver as srv
+
+    cfg = make_cfg_with_static_rules(
+        tmp_path, [{"action_type": "file_read", "source_scope": "global"}]
+    )
+    srv.init_server(cfg)
+
+    for source in ("user@example.com", "other@example.com", "anyone"):
+        result = await srv.mcp.call_tool(
+            "gate",
+            {
+                "action_description": "read a file",
+                "action_type": "file_read",
+                "session_id": "s",
+                "source_id": source,
+                "channel_type": "email_body",
+            },
+        )
+        data = result.structured_content
+        assert data["allowlisted"] is True
+        assert data["allowlist_source"] == "config"
+        assert data["allowlist_rule_id"] is None
+        assert data["recommendation"] == "allow"
+
+
+async def test_gate_static_source_scoped_rule_matches_own_source(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """A source-scoped static config rule only matches its own source_id."""
+    import clawstrike.mcpserver as srv
+
+    cfg = make_cfg_with_static_rules(
+        tmp_path,
+        [{"action_type": "send_email", "source_scope": "owner@example.com"}],
+    )
+    srv.init_server(cfg)
+
+    # Matching source → allowlisted
+    r_match = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "s1",
+            "source_id": "owner@example.com",
+            "channel_type": "owner_dm",
+        },
+    )
+    assert r_match.structured_content["allowlisted"] is True
+    assert r_match.structured_content["allowlist_source"] == "config"
+
+    # Different source → not allowlisted
+    r_no = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "s2",
+            "source_id": "other@example.com",
+            "channel_type": "owner_dm",
+        },
+    )
+    assert r_no.structured_content["allowlisted"] is False
+    assert r_no.structured_content["allowlist_source"] is None
+
+
+async def test_gate_static_rule_wrong_action_type_no_match(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Static config rule does not match a different action_type."""
+    import clawstrike.mcpserver as srv
+
+    cfg = make_cfg_with_static_rules(
+        tmp_path, [{"action_type": "file_read", "source_scope": "global"}]
+    )
+    srv.init_server(cfg)
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "s",
+            "source_id": "user@example.com",
+            "channel_type": "email_body",
+        },
+    )
+    assert result.structured_content["allowlisted"] is False
+
+
+async def test_gate_static_rule_db_rule_takes_priority(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """When both DB and config rules match, DB rule is used (checked first)."""
+    import clawstrike.mcpserver as srv
+
+    cfg = make_cfg_with_static_rules(
+        tmp_path,
+        [{"action_type": "send_email", "source_scope": "global"}],
+        db_name="priority_test.db",
+    )
+    srv.init_server(cfg)
+
+    # Create a DB rule via confirm
+    await srv.mcp.call_tool(
+        "confirm",
+        {
+            "action_type": "send_email",
+            "action_description": "send email",
+            "session_id": "sess",
+            "source_id": "user@example.com",
+            "channel_type": "email_body",
+            "decision": "always_allow",
+        },
+    )
+
+    result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "send email",
+            "action_type": "send_email",
+            "session_id": "sess",
+            "source_id": "user@example.com",
+            "channel_type": "email_body",
+        },
+    )
+    data = result.structured_content
+    assert data["allowlisted"] is True
+    # DB rule takes priority over config rule
+    assert data["allowlist_source"] == "db"
+    assert data["allowlist_rule_id"] is not None
+
+
+async def test_gate_static_rule_audit_includes_allowlist_source_config(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """Audit event details include allowlist_source='config' for config rule matches."""
+    import clawstrike.mcpserver as srv
+
+    cfg = make_cfg_with_static_rules(
+        tmp_path, [{"action_type": "file_read", "source_scope": "global"}]
+    )
+    srv.init_server(cfg)
+
+    await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "read a file",
+            "action_type": "file_read",
+            "session_id": "audit-s",
+            "source_id": "user@example.com",
+            "channel_type": "email_body",
+        },
+    )
+
+    events = await get_audit_events(str(cfg.audit.db_path), event_type="action_gate")
+    assert len(events) == 1
+    details = json.loads(events[0]["details_json"])
+    assert details["allowlisted"] is True
+    assert details["allowlist_source"] == "config"
+    assert details["allowlist_rule_id"] is None

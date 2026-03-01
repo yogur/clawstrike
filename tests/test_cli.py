@@ -786,3 +786,120 @@ def test_logs_nonexistent_db_exports_zero_events(
 
     assert result.exit_code == 0
     assert "0" in result.output
+
+
+# ---------------------------------------------------------------------------
+# `clawstrike allowlist list`
+# ---------------------------------------------------------------------------
+
+
+def test_allowlist_list_no_rules(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """allowlist list prints 'No allowlist rules found.' when DB and config are empty."""
+    monkeypatch.chdir(tmp_path)
+    missing_db = tmp_path / "empty.db"
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(missing_db)}})
+    )
+
+    result = runner.invoke(app, ["allowlist", "list", "--config", str(cfg_file)])
+
+    assert result.exit_code == 0
+    assert "No allowlist rules found." in result.output
+
+
+def test_allowlist_list_shows_config_static_rules(tmp_path: Path) -> None:
+    """allowlist list shows static config rules with source=config."""
+    cfg_file = write_yaml(
+        tmp_path,
+        minimal_config(
+            {
+                "audit": {"db_path": str(tmp_path / "test.db")},
+                "action_gating": {
+                    "static_rules": [
+                        {"action_type": "file_read", "source_scope": "global"},
+                        {
+                            "action_type": "send_email",
+                            "source_scope": "owner@example.com",
+                        },
+                    ]
+                },
+            }
+        ),
+    )
+
+    result = runner.invoke(app, ["allowlist", "list", "--config", str(cfg_file)])
+
+    assert result.exit_code == 0
+    assert "config" in result.output
+    assert "file_read" in result.output
+    assert "global" in result.output
+    assert "send_email" in result.output
+    assert "owner@example.com" in result.output
+    assert "(static)" in result.output
+
+
+def test_allowlist_list_shows_db_rules(tmp_path: Path) -> None:
+    """allowlist list shows dynamic DB rules with source=db."""
+    from clawstrike.db import setup_audit_db
+
+    db_path = tmp_path / "test.db"
+    setup_audit_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO action_allowlist "
+            "(action_type, action_pattern, source_scope, created_at, created_by) "
+            "VALUES (?, NULL, ?, ?, ?)",
+            ("shell_exec", "user@example.com", "2026-01-01T10:00:00+00:00", "owner"),
+        )
+        conn.commit()
+
+    cfg_file = write_yaml(
+        tmp_path, minimal_config({"audit": {"db_path": str(db_path)}})
+    )
+
+    result = runner.invoke(app, ["allowlist", "list", "--config", str(cfg_file)])
+
+    assert result.exit_code == 0
+    assert "db" in result.output
+    assert "shell_exec" in result.output
+    assert "user@example.com" in result.output
+
+
+def test_allowlist_list_shows_both_config_and_db_rules(tmp_path: Path) -> None:
+    """allowlist list shows both static config and dynamic DB rules in one table."""
+    from clawstrike.db import setup_audit_db
+
+    db_path = tmp_path / "test.db"
+    setup_audit_db(db_path)
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.execute(
+            "INSERT INTO action_allowlist "
+            "(action_type, action_pattern, source_scope, created_at, created_by) "
+            "VALUES (?, NULL, ?, ?, ?)",
+            ("file_write", "global", "2026-02-01T08:00:00+00:00", "owner"),
+        )
+        conn.commit()
+
+    cfg_file = write_yaml(
+        tmp_path,
+        minimal_config(
+            {
+                "audit": {"db_path": str(db_path)},
+                "action_gating": {
+                    "static_rules": [
+                        {"action_type": "calendar_read", "source_scope": "global"}
+                    ]
+                },
+            }
+        ),
+    )
+
+    result = runner.invoke(app, ["allowlist", "list", "--config", str(cfg_file)])
+
+    assert result.exit_code == 0
+    assert "config" in result.output
+    assert "calendar_read" in result.output
+    assert "db" in result.output
+    assert "file_write" in result.output

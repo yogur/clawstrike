@@ -339,6 +339,25 @@ AUDIT_EVENT_FIELDS: list[str] = [
 ]
 
 
+def list_allowlist_rules(path: str | Path) -> list[dict]:
+    """Return all rows from action_allowlist ordered by id ascending.
+
+    Uses stdlib ``sqlite3`` for synchronous CLI access without an event loop.
+    Returns an empty list when the database file does not exist.
+    """
+    db_path = Path(path)
+    if not db_path.exists():
+        return []
+
+    with sqlite3.connect(str(db_path)) as conn:
+        conn.row_factory = sqlite3.Row
+        cursor = conn.execute(
+            "SELECT id, action_type, action_pattern, source_scope, created_at, "
+            "created_by FROM action_allowlist ORDER BY id ASC"
+        )
+        return [dict(row) for row in cursor.fetchall()]
+
+
 def query_audit_events(
     path: str | Path,
     *,

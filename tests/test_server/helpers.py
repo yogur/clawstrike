@@ -37,6 +37,22 @@ def make_cfg_with_trust(tmp_path: Path, channel: str, trust: str) -> ClawStrikeC
     return load_config(write_yaml(tmp_path, data))
 
 
+def make_cfg_with_static_rules(
+    tmp_path: Path,
+    static_rules: list[dict],
+    *,
+    db_name: str = "static_rules_test.db",
+) -> ClawStrikeConfig:
+    """Return a config with static allowlist rules and an isolated DB."""
+    data = minimal_config(
+        {
+            "audit": {"db_path": str(tmp_path / db_name)},
+            "action_gating": {"static_rules": static_rules},
+        }
+    )
+    return load_config(write_yaml(tmp_path, data))
+
+
 def make_cfg_with_contacts(
     tmp_path: Path,
     contacts: dict[str, str],

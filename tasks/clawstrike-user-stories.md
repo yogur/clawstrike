@@ -290,16 +290,16 @@
 
 ---
 
-### US-021: Read-Only Allowlist CLI + Static Config Rules
+### US-021: Read-Only Allowlist CLI + Static Config Rules ✅ DONE
 
 **Description:** As a ClawStrike user, I want to view current allowlist rules and define static pre-approved actions in my config file so that I can audit and manage permissions without exposing mutation commands to the agent.
 
 **Acceptance Criteria:**
-- [ ] `clawstrike allowlist list` prints all allowlist rules (both dynamic DB rules and static config rules) in a table format showing source (db/config), ID (for DB rules), action type, source scope, and creation date
-- [ ] Static rules from `action_gating.static_rules` in config are checked alongside DB rules in `gate` — same matching logic (exact `action_type`, global or source-scoped)
-- [ ] Static config rules are distinguished from dynamic DB rules in the `gate` response (`allowlist_source: "config"` vs `"db"`)
-- [ ] The audit log for auto-allowed actions references whether the rule came from config or DB
-- [ ] There are no `allowlist remove` or `allowlist clear` CLI commands — removing dynamic rules requires direct DB access or clearing the DB file; static rules are managed by editing the config (see PRD Section 4.5 for rationale)
+- [x] `clawstrike allowlist list` prints all allowlist rules (both dynamic DB rules and static config rules) in a table format showing source (db/config), ID (for DB rules), action type, source scope, and creation date
+- [x] Static rules from `action_gating.static_rules` in config are checked alongside DB rules in `gate` — same matching logic (exact `action_type`, global or source-scoped)
+- [x] Static config rules are distinguished from dynamic DB rules in the `gate` response (`allowlist_source: "config"` vs `"db"`)
+- [x] The audit log for auto-allowed actions references whether the rule came from config or DB
+- [x] There are no `allowlist remove` or `allowlist clear` CLI commands — removing dynamic rules requires direct DB access or clearing the DB file; static rules are managed by editing the config (see PRD Section 4.5 for rationale)
 
 ---
 
