@@ -319,17 +319,17 @@
 
 ---
 
-### US-043: Confirm Tool Guard for Flagged Sessions
+### US-043: Confirm Tool Guard for Flagged Sessions ✅ DONE
 
 **Description:** As a ClawStrike user, I want `always_allow` decisions to be blocked in sessions where prompt injection was detected so that a compromised session cannot create persistent allowlist rules.
 
 **Acceptance Criteria:**
-- [ ] When `action_gating.guard_allowlist_on_flag` is `true` (default) and the session identified by `session_id` is in `_elevated_sessions` OR `_mismatch_sessions`, `always_allow` and `always_allow_global` decisions are silently downgraded to `approve` — no allowlist rule is created
-- [ ] The `confirm` response includes `guard_applied: true` and `guard_reason: "elevated_scrutiny"` or `"content_source_mismatch"` (prefer `"elevated_scrutiny"` if both apply) when the guard triggers
-- [ ] The `action_confirm` audit event records `guard_applied: true` and the guard reason when the guard triggers
-- [ ] When `action_gating.guard_allowlist_on_flag` is `false`, the guard is disabled — `always_allow` proceeds subject only to `allowlist_learning`
-- [ ] In CLI mode (one-shot invocation), `_elevated_sessions` and `_mismatch_sessions` are always empty; the guard never fires — this is an accepted limitation of stateless CLI operation
-- [ ] The guard stacks with `allowlist_learning: false`: when both apply, the downgrade-to-approve reason shown is `allowlist_learning_disabled`
+- [x] When `action_gating.guard_allowlist_on_flag` is `true` (default) and the session identified by `session_id` is in `_elevated_sessions` OR `_mismatch_sessions`, `always_allow` and `always_allow_global` decisions are silently downgraded to `approve` — no allowlist rule is created
+- [x] The `confirm` response includes `guard_applied: true` and `guard_reason: "elevated_scrutiny"` or `"content_source_mismatch"` (prefer `"elevated_scrutiny"` if both apply) when the guard triggers
+- [x] The `action_confirm` audit event records `guard_applied: true` and the guard reason when the guard triggers
+- [x] When `action_gating.guard_allowlist_on_flag` is `false`, the guard is disabled — `always_allow` proceeds subject only to `allowlist_learning`
+- [x] In CLI mode (one-shot invocation), `_elevated_sessions` and `_mismatch_sessions` are always empty; the guard never fires — this is an accepted limitation of stateless CLI operation
+- [x] The guard stacks with `allowlist_learning: false`: when both apply, the downgrade-to-approve reason shown is `allowlist_learning_disabled`
 
 ---
 

@@ -480,3 +480,24 @@
   - `CLAUDE.md` — updated classify response shapes pattern
 - 276 tests pass; ruff check and ruff format clean
 ---
+
+## [2026-03-01] - US-043
+- What was implemented:
+  - `guard_allowlist_on_flag: bool = True` added to `ActionGatingConfig` in `config.py`
+  - `confirm` tool updated with guard logic: when `guard_allowlist_on_flag=True` and `session_id` is in `_elevated_sessions` OR `_mismatch_sessions`, `always_allow`/`always_allow_global` decisions are silently downgraded to `approve` — no allowlist rule created
+  - Guard reason logic: prefer `"elevated_scrutiny"` over `"content_source_mismatch"` when both apply; use `"allowlist_learning_disabled"` when both guard fires AND `allowlist_learning=False`
+  - `confirm` response always includes `guard_applied: bool`; includes `guard_reason: str` only when `guard_applied=True`
+  - Audit event `details` includes `guard_applied` and `guard_reason` when guard fires
+  - 12 new tests covering all guard scenarios (parametrized for guard reasons, variants, stacking, disabled guard, empty session ID)
+- Files changed:
+  - `src/clawstrike/config.py` — added `guard_allowlist_on_flag: bool = True` to `ActionGatingConfig`
+  - `src/clawstrike/mcpserver.py` — updated `confirm` tool with guard check + response/audit fields
+  - `tests/test_server/test_confirm.py` — 12 new guard tests
+  - `tasks/clawstrike-user-stories.md` — marked US-043 as DONE
+- 270 tests pass; ruff check and ruff format clean
+- **Learnings for future iterations:**
+  - Guard logic runs BEFORE allowlist_learning check so that the stacking case (guard + learning=False → `allowlist_learning_disabled`) can be detected by checking `not cfg.action_gating.allowlist_learning` inside the guard branch
+  - `guard_applied: bool` is always in the response (False by default); `guard_reason` is conditionally added only when guard fires — keeps response clean while remaining inspectable
+  - The guard never fires in CLI mode because `_elevated_sessions` and `_mismatch_sessions` are module-level sets that are always empty in one-shot CLI invocations; no special CLI handling needed
+  - Empty `session_id = ""` is never added to `_elevated_sessions`/`_mismatch_sessions` (guarded by `if session_id:` in classify), so guard naturally doesn't fire for empty session IDs
+---

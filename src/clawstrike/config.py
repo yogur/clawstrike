@@ -114,6 +114,7 @@ class ActionGatingConfig(BaseModel):
     enabled: bool = True
     confirmation_channel: str = "owner_dm"
     allowlist_learning: bool = True
+    guard_allowlist_on_flag: bool = True
 
 
 class AuditConfig(BaseModel):

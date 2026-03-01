@@ -435,12 +435,31 @@ async def confirm(
     outcome = "deny" if normalized == "deny" else "allow"
 
     # Create allowlist rule for always_allow / always_allow_global when
-    # allowlist_learning is enabled.
+    # allowlist_learning is enabled. The guard blocks rule creation when
+    # the session is flagged for elevated scrutiny or a content-source mismatch.
     allowlist_created = False
     allowlist_rule_id: int | None = None
+    guard_applied = False
+    guard_reason: str | None = None
 
     if normalized in ("always_allow", "always_allow_global"):
-        if cfg.action_gating.allowlist_learning:
+        # Guard: block always_allow in sessions with detected injection signals.
+        guard_fires = cfg.action_gating.guard_allowlist_on_flag and (
+            session_id in _elevated_sessions or session_id in _mismatch_sessions
+        )
+
+        if guard_fires:
+            guard_applied = True
+            if not cfg.action_gating.allowlist_learning:
+                # Both guard and allowlist_learning=False prevent rule creation.
+                guard_reason = "allowlist_learning_disabled"
+            elif session_id in _elevated_sessions:
+                guard_reason = "elevated_scrutiny"
+            else:
+                guard_reason = "content_source_mismatch"
+            # Downgrade to approve regardless of guard_reason.
+            normalized = "approve"
+        elif cfg.action_gating.allowlist_learning:
             scope = "global" if normalized == "always_allow_global" else source_id
             if _db_path:
                 async with open_db(_db_path) as conn:
@@ -471,6 +490,16 @@ async def confirm(
     # Write action_confirm audit event.
     if _db_path:
         async with open_db(_db_path) as conn:
+            audit_details: dict[str, Any] = {
+                "action_type": action_type,
+                "action_description": action_description,
+                "user_decision": normalized,
+                "allowlist_created": allowlist_created,
+                "allowlist_rule_id": allowlist_rule_id,
+            }
+            if guard_applied:
+                audit_details["guard_applied"] = True
+                audit_details["guard_reason"] = guard_reason
             await insert_audit_event(
                 conn,
                 event_type="action_confirm",
@@ -478,16 +507,10 @@ async def confirm(
                 source_id=source_id,
                 channel_type=channel_type,
                 decision=outcome,
-                details={
-                    "action_type": action_type,
-                    "action_description": action_description,
-                    "user_decision": normalized,
-                    "allowlist_created": allowlist_created,
-                    "allowlist_rule_id": allowlist_rule_id,
-                },
+                details=audit_details,
             )
 
-    return {
+    response: dict[str, Any] = {
         "status": "recorded",
         "decision": outcome,
         "user_decision": normalized,
@@ -497,7 +520,11 @@ async def confirm(
         "channel_type": channel_type,
         "allowlist_created": allowlist_created,
         "allowlist_rule_id": allowlist_rule_id,
+        "guard_applied": guard_applied,
     }
+    if guard_applied:
+        response["guard_reason"] = guard_reason
+    return response
 
 
 # ---------------------------------------------------------------------------

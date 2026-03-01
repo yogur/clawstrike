@@ -277,3 +277,186 @@ async def test_e2e_gate_prompt_user_then_always_allow_then_gate_allow(
     gate_events = [e for e in all_events if e["event_type"] == "action_gate"]
     details = json.loads(gate_events[-1]["details_json"])
     assert details["allowlisted"] is True
+
+
+# ---------------------------------------------------------------------------
+# Guard: always_allow blocked in flagged sessions
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    "guard_reason,use_elevated,use_mismatch",
+    [
+        ("elevated_scrutiny", True, False),
+        ("content_source_mismatch", False, True),
+        ("elevated_scrutiny", True, True),  # both → prefer elevated_scrutiny
+    ],
+)
+async def test_confirm_guard_blocks_always_allow_in_flagged_session(
+    cfg: ClawStrikeConfig,
+    reset_server_config: MagicMock,
+    guard_reason: str,
+    use_elevated: bool,
+    use_mismatch: bool,
+) -> None:
+    """Guard silently downgrades always_allow to approve in flagged sessions."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    sess = "guarded-sess"
+    if use_elevated:
+        srv._elevated_sessions.add(sess)
+    if use_mismatch:
+        srv._mismatch_sessions.add(sess)
+
+    result = await srv.mcp.call_tool(
+        "confirm",
+        {**_CONFIRM_BASE, "session_id": sess, "decision": "always_allow"},
+    )
+    data = result.structured_content
+    assert data["allowlist_created"] is False
+    assert data["allowlist_rule_id"] is None
+    assert data["user_decision"] == "approve"
+    assert data["guard_applied"] is True
+    assert data["guard_reason"] == guard_reason
+
+
+async def test_confirm_guard_writes_audit_event_with_guard_fields(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """Guard trigger is recorded in the action_confirm audit event."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    sess = "guarded-audit-sess"
+    srv._elevated_sessions.add(sess)
+
+    await srv.mcp.call_tool(
+        "confirm",
+        {**_CONFIRM_BASE, "session_id": sess, "decision": "always_allow"},
+    )
+
+    events = await get_audit_events(str(cfg.audit.db_path), event_type="action_confirm")
+    assert len(events) == 1
+    details = json.loads(events[0]["details_json"])
+    assert details["guard_applied"] is True
+    assert details["guard_reason"] == "elevated_scrutiny"
+
+
+@pytest.mark.parametrize(
+    "decision", ["always_allow", "always_allow_global", "aa", "aag"]
+)
+async def test_confirm_guard_blocks_all_always_allow_variants(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock, decision: str
+) -> None:
+    """Guard applies to both always_allow and always_allow_global (and their aliases)."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    sess = "guard-variant-sess"
+    srv._elevated_sessions.add(sess)
+
+    result = await srv.mcp.call_tool(
+        "confirm",
+        {**_CONFIRM_BASE, "session_id": sess, "decision": decision},
+    )
+    data = result.structured_content
+    assert data["allowlist_created"] is False
+    assert data["guard_applied"] is True
+
+
+async def test_confirm_guard_disabled_allows_rule_creation(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """When guard_allowlist_on_flag=False, always_allow succeeds even in flagged sessions."""
+    import clawstrike.mcpserver as srv
+
+    data = minimal_config(
+        {
+            "audit": {"db_path": str(tmp_path / "test.db")},
+            "action_gating": {
+                "guard_allowlist_on_flag": False,
+                "allowlist_learning": True,
+            },
+        }
+    )
+    cfg = load_config(write_yaml(tmp_path, data))
+    srv.init_server(cfg)
+
+    sess = "no-guard-sess"
+    srv._elevated_sessions.add(sess)
+
+    result = await srv.mcp.call_tool(
+        "confirm",
+        {**_CONFIRM_BASE, "session_id": sess, "decision": "always_allow"},
+    )
+    data_out = result.structured_content
+    assert data_out["allowlist_created"] is True
+    assert data_out["guard_applied"] is False
+
+
+async def test_confirm_guard_stacks_with_allowlist_learning_disabled(
+    tmp_path: Path, reset_server_config: MagicMock
+) -> None:
+    """When guard fires AND allowlist_learning=False, reason is allowlist_learning_disabled."""
+    import clawstrike.mcpserver as srv
+
+    data = minimal_config(
+        {
+            "audit": {"db_path": str(tmp_path / "test.db")},
+            "action_gating": {
+                "guard_allowlist_on_flag": True,
+                "allowlist_learning": False,
+            },
+        }
+    )
+    cfg = load_config(write_yaml(tmp_path, data))
+    srv.init_server(cfg)
+
+    sess = "stack-sess"
+    srv._elevated_sessions.add(sess)
+
+    result = await srv.mcp.call_tool(
+        "confirm",
+        {**_CONFIRM_BASE, "session_id": sess, "decision": "always_allow"},
+    )
+    data_out = result.structured_content
+    assert data_out["allowlist_created"] is False
+    assert data_out["guard_applied"] is True
+    assert data_out["guard_reason"] == "allowlist_learning_disabled"
+
+
+async def test_confirm_guard_not_applied_when_no_flag(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """guard_applied=False when session is not in elevated or mismatch sets."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    result = await srv.mcp.call_tool(
+        "confirm", {**_CONFIRM_BASE, "decision": "always_allow"}
+    )
+    data = result.structured_content
+    assert data["guard_applied"] is False
+    assert "guard_reason" not in data
+    assert data["allowlist_created"] is True
+
+
+async def test_confirm_guard_empty_session_id_never_fires(
+    cfg: ClawStrikeConfig, reset_server_config: MagicMock
+) -> None:
+    """Empty session_id is never in _elevated_sessions/_mismatch_sessions — guard never fires."""
+    import clawstrike.mcpserver as srv
+
+    srv.init_server(cfg)
+    # Ensure empty string is not in sets (it should never be added, but verify guard
+    # doesn't fire even if sets have other sessions).
+    srv._elevated_sessions.add("other-sess")
+
+    result = await srv.mcp.call_tool(
+        "confirm",
+        {**_CONFIRM_BASE, "session_id": "", "decision": "always_allow"},
+    )
+    data = result.structured_content
+    assert data["guard_applied"] is False
+    assert data["allowlist_created"] is True
