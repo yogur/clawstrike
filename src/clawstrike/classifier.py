@@ -29,7 +29,7 @@ class ClassifierResult:
 
 
 class BaseClassifier(ABC):
-    """Extension point for custom classifiers (US-007)."""
+    """Extension point for custom classifiers."""
 
     @abstractmethod
     def classify(self, text: str) -> ClassifierResult:

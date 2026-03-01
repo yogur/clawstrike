@@ -1,4 +1,4 @@
-"""Unit tests for US-012/US-023/US-024: db.py — Contact Registry and Audit Events."""
+"""Unit tests for db.py — Contact Registry and Audit Events."""
 
 from __future__ import annotations
 
@@ -166,7 +166,7 @@ async def test_insert_audit_event_writes_row(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# increment_interaction — US-013
+# increment_interaction
 # ---------------------------------------------------------------------------
 
 
@@ -217,7 +217,7 @@ async def test_increment_interaction_multiple_times(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# set_contact_trust_level — US-013
+# set_contact_trust_level
 # ---------------------------------------------------------------------------
 
 
@@ -266,7 +266,7 @@ async def test_insert_audit_event_is_first_contact_false(tmp_path: Path) -> None
 
 
 # ---------------------------------------------------------------------------
-# US-023 — Audit Log Schema: required columns present in DDL
+# Audit Log Schema: required columns present in DDL
 # ---------------------------------------------------------------------------
 
 
@@ -283,7 +283,7 @@ async def test_audit_events_schema_has_required_columns(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-024 — insert_audit_event: new fields (label, raw_input_hash, snippet)
+# insert_audit_event: new fields (label, raw_input_hash, snippet)
 # ---------------------------------------------------------------------------
 
 
@@ -338,7 +338,7 @@ async def test_insert_audit_event_null_raw_fields_when_omitted(tmp_path: Path) -
 
 
 # ---------------------------------------------------------------------------
-# US-023 — setup_audit_db: synchronous startup initializer
+# setup_audit_db: synchronous startup initializer
 # ---------------------------------------------------------------------------
 
 
@@ -382,7 +382,7 @@ def test_setup_audit_db_idempotent(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-020 — action_allowlist: check_allowlist and insert_allowlist_rule
+# action_allowlist: check_allowlist and insert_allowlist_rule
 # ---------------------------------------------------------------------------
 
 

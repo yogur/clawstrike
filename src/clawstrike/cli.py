@@ -97,7 +97,7 @@ def start(
         typer.echo(f"Error: {exc}", err=True)
         raise typer.Exit(code=1) from exc
 
-    # Initialize audit DB and log status (US-023 AC4).
+    # Initialize audit DB and log status.
     if cfg.audit.enabled:
         from clawstrike.db import setup_audit_db
 
@@ -341,20 +341,20 @@ def logs(
 
 @app.command()
 def trust() -> None:
-    """Manually trust a contact (US-014)."""
+    """Manually trust a contact."""
     typer.echo("Not yet implemented.", err=True)
     raise typer.Exit(code=1)
 
 
 @app.command()
 def block() -> None:
-    """Manually block a contact (US-014)."""
+    """Manually block a contact."""
     typer.echo("Not yet implemented.", err=True)
     raise typer.Exit(code=1)
 
 
 @app.command()
 def allowlist() -> None:
-    """Manage the action allowlist (US-021)."""
+    """Manage the action allowlist."""
     typer.echo("Not yet implemented.", err=True)
     raise typer.Exit(code=1)

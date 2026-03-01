@@ -50,7 +50,7 @@ _TAXONOMY: dict[str, str] = {
     "list_directory": "low",
 }
 
-# Unknown action types default to HIGH (fail-safe per US-017 AC3).
+# Unknown action types default to HIGH (fail-safe).
 _DEFAULT_RISK = "high"
 
 
@@ -117,7 +117,7 @@ def apply_decision_matrix(risk_level: str, trust_level: TrustLevel) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Trust-level downgrade for elevated scrutiny (US-022)
+# Trust-level downgrade for elevated scrutiny
 # ---------------------------------------------------------------------------
 
 _TRUST_DOWNGRADE: dict[TrustLevel, TrustLevel] = {
@@ -133,6 +133,6 @@ def downgrade_trust(trust_level: TrustLevel) -> TrustLevel:
 
     Ordering: HIGH → MEDIUM → LOW → UNTRUSTED (floor; stays at UNTRUSTED).
     Called once per elevation source; stack multiple calls for stacked downgrades
-    (e.g. elevated scrutiny + content-source mismatch from US-016).
+    (e.g. elevated scrutiny + content-source mismatch).
     """
     return _TRUST_DOWNGRADE[trust_level]

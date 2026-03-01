@@ -1,9 +1,9 @@
 """Tests for the classify MCP tool.
 
-Covers US-002 (classify basic), US-008/009/010 (block/flag/pass pipeline),
-US-011/015 (trust resolution and threshold modulation), US-012 (first contact),
-US-013 (interaction tracking and auto-promotion), US-024 (classify audit events),
-and US-016 (content-source mismatch detection — classify side).
+Covers classify basic functionality, block/flag/pass decision pipeline, trust
+resolution and threshold modulation, first contact detection, interaction
+tracking and auto-promotion, classify audit events, and content-source
+mismatch detection.
 """
 
 from __future__ import annotations
@@ -45,7 +45,7 @@ _CLASSIFY_ARGS = {
 
 
 # ---------------------------------------------------------------------------
-# US-002 — classify tool basic response shape
+# Classify tool basic response shape
 # ---------------------------------------------------------------------------
 
 
@@ -75,7 +75,7 @@ async def test_classify_returns_expected_fields(cfg: ClawStrikeConfig) -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-008/009/010 — block / flag / pass decision pipeline
+# Block / flag / pass decision pipeline
 # ---------------------------------------------------------------------------
 
 
@@ -207,7 +207,7 @@ async def test_classify_elevated_scrutiny_scoped_to_session(
 
 
 # ---------------------------------------------------------------------------
-# US-011 / US-015 — trust resolution and threshold modulation
+# Trust resolution and threshold modulation
 # ---------------------------------------------------------------------------
 
 
@@ -275,7 +275,7 @@ async def test_classify_high_trust_raises_block_threshold(
 ) -> None:
     """Score 0.93 blocks at base (0.92) but only flags at owner_dm HIGH trust (eff_block=0.97).
 
-    Pre-condition: seed contact so US-012 first-contact UNTRUSTED override does not apply.
+    Pre-condition: seed contact so first-contact UNTRUSTED override does not apply.
     """
     import clawstrike.mcpserver as srv
 
@@ -314,7 +314,7 @@ async def test_classify_high_trust_raises_block_threshold(
 
 
 # ---------------------------------------------------------------------------
-# US-012 — Contact Registry: First Contact Detection
+# Contact Registry: First Contact Detection
 # ---------------------------------------------------------------------------
 
 
@@ -419,7 +419,7 @@ async def test_classify_two_source_ids_each_first_contact(
 
 
 # ---------------------------------------------------------------------------
-# US-013 — Interaction Tracking & Auto-Promotion
+# Interaction Tracking & Auto-Promotion
 # ---------------------------------------------------------------------------
 
 
@@ -578,7 +578,7 @@ async def test_classify_auto_promote_only_once(
 
 
 # ---------------------------------------------------------------------------
-# US-024 — Classify audit events
+# Classify audit events
 # ---------------------------------------------------------------------------
 
 
@@ -761,7 +761,7 @@ async def test_classify_audit_snippet_truncated_to_max_chars(
 
 
 # ---------------------------------------------------------------------------
-# US-016 — Content-Source Mismatch Detection (classify side)
+# Content-Source Mismatch Detection (classify side)
 #
 # Mismatch fires when: trust_level in (HIGH, MEDIUM) AND score >= base_flag (0.70).
 # HIGH trust: eff_flag=0.80, eff_block=0.97

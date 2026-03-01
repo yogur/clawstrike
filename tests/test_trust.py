@@ -1,4 +1,4 @@
-"""Unit tests for the trust engine (US-011 + US-015)."""
+"""Unit tests for the trust engine."""
 
 from __future__ import annotations
 
@@ -8,7 +8,7 @@ from clawstrike.config import ThresholdModifier, TrustConfig, TrustLevel
 from clawstrike.trust import compute_effective_thresholds, resolve_trust_level
 
 # ---------------------------------------------------------------------------
-# US-011: Channel Trust Level Resolution
+# Channel Trust Level Resolution
 # ---------------------------------------------------------------------------
 
 
@@ -39,7 +39,7 @@ def test_custom_channel_in_config_resolves_correctly() -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-015: Trust-Modulated Classifier Thresholds
+# Trust-Modulated Classifier Thresholds
 # ---------------------------------------------------------------------------
 
 

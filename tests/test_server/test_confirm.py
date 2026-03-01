@@ -1,4 +1,4 @@
-"""Tests for US-019 (confirm tool) and US-020 (allowlist creation via confirm)."""
+"""Tests for confirm tool and allowlist creation via confirm."""
 
 from __future__ import annotations
 
@@ -23,7 +23,7 @@ _CONFIRM_BASE = {
 
 
 # ---------------------------------------------------------------------------
-# US-019 — confirm tool basic behavior
+# Confirm tool basic behavior
 # ---------------------------------------------------------------------------
 
 
@@ -127,7 +127,7 @@ async def test_confirm_audit_event(
 
 
 # ---------------------------------------------------------------------------
-# US-020 — allowlist creation via confirm
+# Allowlist creation via confirm
 # ---------------------------------------------------------------------------
 
 
@@ -210,7 +210,7 @@ async def test_confirm_always_allow_disabled_downgrades_to_approve(
 
 
 # ---------------------------------------------------------------------------
-# US-019/020 — E2E: gate → confirm → gate flow
+# E2E: gate → confirm → gate flow
 # ---------------------------------------------------------------------------
 
 

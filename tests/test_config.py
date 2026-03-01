@@ -1,4 +1,4 @@
-"""Tests for US-001: YAML Configuration Loading."""
+"""Tests for YAML Configuration Loading."""
 
 from __future__ import annotations
 

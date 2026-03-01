@@ -11,7 +11,7 @@ from clawstrike.config import TrustLevel
 from clawstrike.gating import apply_decision_matrix, classify_action, downgrade_trust
 
 # ---------------------------------------------------------------------------
-# US-017 — Action Risk Taxonomy
+# Action Risk Taxonomy
 # ---------------------------------------------------------------------------
 
 
@@ -58,7 +58,7 @@ def test_empty_action_type_defaults_to_high() -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-018 — Gating Decision Matrix
+# Gating Decision Matrix
 # ---------------------------------------------------------------------------
 
 
@@ -94,7 +94,7 @@ def test_decision_matrix(
 
 
 # ---------------------------------------------------------------------------
-# US-022 — Trust-Level Downgrade for Elevated Scrutiny
+# Trust-Level Downgrade for Elevated Scrutiny
 # ---------------------------------------------------------------------------
 
 

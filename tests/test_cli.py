@@ -1,4 +1,4 @@
-"""Tests for the ClawStrike CLI commands (US-002 and CLI integration story)."""
+"""Tests for the ClawStrike CLI commands."""
 
 from __future__ import annotations
 
@@ -344,7 +344,7 @@ def test_gate_invalid_json_exits_1(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-023 AC4 — startup logs audit DB status
+# Startup logs audit DB status
 # ---------------------------------------------------------------------------
 
 
@@ -393,7 +393,7 @@ def test_start_logs_audit_db_ready_with_event_count(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-019 — `clawstrike confirm` CLI command
+# `clawstrike confirm` CLI command
 # ---------------------------------------------------------------------------
 
 _CONFIRM_PARAMS = json.dumps(
@@ -439,7 +439,7 @@ def test_confirm_invalid_json_exits_1(tmp_path: Path) -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-028 — `clawstrike logs --export csv --output <path>`
+# `clawstrike logs --export csv --output <path>`
 # ---------------------------------------------------------------------------
 
 

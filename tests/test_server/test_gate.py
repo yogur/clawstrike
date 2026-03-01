@@ -1,8 +1,8 @@
 """Tests for the gate MCP tool.
 
-Covers US-002 (gate basic), US-011 (trust resolution), US-017 (action taxonomy),
-US-018 (decision matrix), US-022 (elevated scrutiny), US-016 (mismatch — gate
-side), and US-020 (allowlist bypass).
+Covers gate basic functionality, trust resolution, action taxonomy, decision
+matrix, elevated scrutiny, content-source mismatch detection, and allowlist
+bypass.
 """
 
 from __future__ import annotations
@@ -18,7 +18,7 @@ from clawstrike.config import ClawStrikeConfig
 from .helpers import get_audit_events, make_cfg_with_trust
 
 # ---------------------------------------------------------------------------
-# US-002 — gate tool basic response shape
+# Gate tool basic response shape
 # ---------------------------------------------------------------------------
 
 
@@ -49,7 +49,7 @@ async def test_gate_returns_expected_fields(cfg: ClawStrikeConfig) -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-011 — channel trust resolution in gate
+# Channel trust resolution in gate
 # ---------------------------------------------------------------------------
 
 
@@ -93,7 +93,7 @@ async def test_gate_unknown_channel_trust_level_is_untrusted(
 
 
 # ---------------------------------------------------------------------------
-# US-017 — action taxonomy classification
+# Action taxonomy classification
 # ---------------------------------------------------------------------------
 
 
@@ -142,7 +142,7 @@ async def test_gate_unknown_action_type_defaults_to_high(
 
 
 # ---------------------------------------------------------------------------
-# US-018 — gating decision matrix
+# Gating decision matrix
 # ---------------------------------------------------------------------------
 
 
@@ -213,7 +213,7 @@ async def test_gate_audit_event_written(cfg: ClawStrikeConfig) -> None:
 
 
 # ---------------------------------------------------------------------------
-# US-022 — Elevated Scrutiny Tightens Gating Recommendations
+# Elevated Scrutiny Tightens Gating Recommendations
 # ---------------------------------------------------------------------------
 
 
@@ -401,7 +401,7 @@ async def test_gate_elevated_via_classify_flag_end_to_end(
 
 
 # ---------------------------------------------------------------------------
-# US-016 — Content-Source Mismatch (gate side)
+# Content-Source Mismatch (gate side)
 # ---------------------------------------------------------------------------
 
 
@@ -536,7 +536,7 @@ async def test_gate_mismatch_audit_records_content_source_mismatch(
 
 
 # ---------------------------------------------------------------------------
-# US-020 — Action allowlist bypass in gate
+# Action allowlist bypass in gate
 # ---------------------------------------------------------------------------
 
 

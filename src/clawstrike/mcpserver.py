@@ -51,9 +51,9 @@ _db_path: str | None = None
 # across restarts.
 _elevated_sessions: set[str] = set()
 
-# Sessions where a content-source mismatch was detected (US-016): a high/medium
-# trust contact sent content that scored above the base flag threshold.
-# These sessions have their effective trust downgraded to LOW in gate calls.
+# Sessions where a content-source mismatch was detected: a high/medium trust
+# contact sent content that scored above the base flag threshold. These sessions
+# have their effective trust downgraded to LOW in gate calls.
 _mismatch_sessions: set[str] = set()
 
 
@@ -139,7 +139,7 @@ async def classify(
     clf = _require_classifier()
     result: ClassifierResult = clf.classify(text)
 
-    # Contact registry — detect first contact (US-012).
+    # Contact registry — detect first contact.
     is_first_contact = False
     contact = None
     if _db_path:
@@ -168,10 +168,10 @@ async def classify(
     else:
         decision = "pass"
 
-    # US-016: content-source mismatch detection.
-    # Fire when a high/medium trust contact sends content that scores above the
-    # *base* flag threshold (before trust modulation).  Tag the session so that
-    # gate calls downgrade the effective trust to LOW for this session.
+    # Content-source mismatch detection: fire when a high/medium trust contact
+    # sends content that scores above the *base* flag threshold (before trust
+    # modulation). Tag the session so that gate calls downgrade the effective
+    # trust to LOW for this session.
     mismatch = (
         trust_level in (TrustLevel.HIGH, TrustLevel.MEDIUM)
         and result.score >= cfg.classifier.threshold.flag
@@ -179,20 +179,20 @@ async def classify(
     if mismatch and session_id:
         _mismatch_sessions.add(session_id)
 
-    # Compute raw input fields for audit log (US-024 AC6).
+    # Compute raw input fields for audit log.
     raw_input_hash = hashlib.sha256(text.encode()).hexdigest()
     raw_input_snippet: str | None = None
     if cfg.audit.log_raw_input:
         raw_input_snippet = text[: cfg.audit.raw_input_max_chars]
 
-    # Post-decision DB writes: interaction tracking + audit log (US-013, US-012, US-024).
+    # Post-decision DB writes: interaction tracking + audit log.
     if _db_path:
         async with open_db(_db_path) as conn:
-            # Increment interaction_count for known, non-blocked contacts (US-013 AC1).
+            # Increment interaction_count for known, non-blocked contacts.
             if not is_first_contact and decision != "block" and contact is not None:
                 updated = await increment_interaction(conn, source_id)
                 # Auto-promote when interaction_count reaches the configured threshold
-                # and the contact has never been manually overridden (US-013 AC2-AC4).
+                # and the contact has never been manually overridden.
                 if (
                     contact.trust_level == "auto"
                     and updated.interaction_count >= cfg.trust.auto_promote_after
@@ -213,7 +213,7 @@ async def classify(
                             "interaction_count": updated.interaction_count,
                         },
                     )
-            # Write content-source mismatch audit event (US-016 AC3).
+            # Write content-source mismatch audit event.
             if mismatch:
                 await insert_audit_event(
                     conn,
@@ -230,7 +230,7 @@ async def classify(
                         "base_flag_threshold": cfg.classifier.threshold.flag,
                     },
                 )
-            # Write classify audit event with full fields (US-024 AC1).
+            # Write classify audit event with full fields.
             await insert_audit_event(
                 conn,
                 event_type="classify",
@@ -303,7 +303,7 @@ async def gate(
     cfg = _require_config()
     base_trust_level = resolve_trust_level(channel_type, cfg.trust)
 
-    # US-020: check allowlist before applying the full gating pipeline.
+    # Check allowlist before applying the full gating pipeline.
     allowlisted = False
     allowlist_rule_id = None
     allowlist_source_scope = None
@@ -315,30 +315,30 @@ async def gate(
             allowlist_rule_id = rule["id"]
             allowlist_source_scope = rule["source_scope"]
 
-    # US-016: force effective trust to LOW when a content-source mismatch was
-    # detected in a prior classify call for this session.  Applied before the
-    # elevated-scrutiny downgrade so both stack correctly.
+    # Force effective trust to LOW when a content-source mismatch was detected
+    # in a prior classify call for this session. Applied before the elevated-
+    # scrutiny downgrade so both stack correctly.
     mismatch = session_id in _mismatch_sessions
     effective_trust_level = TrustLevel.LOW if mismatch else base_trust_level
 
-    # US-022: downgrade trust by one tier when session has elevated scrutiny.
-    # Stacks with mismatch: if mismatch forced LOW, elevated_scrutiny → UNTRUSTED.
+    # Downgrade trust by one tier when session has elevated scrutiny. Stacks with
+    # mismatch: if mismatch forced LOW, elevated_scrutiny → UNTRUSTED.
     elevated = session_id in _elevated_sessions
     if elevated:
         effective_trust_level = downgrade_trust(effective_trust_level)
 
-    # US-017: classify action_type against the hardcoded risk taxonomy.
+    # Classify action_type against the hardcoded risk taxonomy.
     risk_level, reason = classify_action(action_type)
 
-    # US-018: apply the gating decision matrix using effective (post-downgrade) trust.
+    # Apply the gating decision matrix using effective (post-downgrade) trust.
     recommendation = apply_decision_matrix(risk_level, effective_trust_level)
 
-    # US-020: allowlisted actions override recommendation to "allow".
+    # Allowlisted actions override recommendation to "allow".
     if allowlisted:
         recommendation = "allow"
 
-    # Write audit event for each gating decision (US-018 AC2).
-    # Record both the original and effective trust tiers (US-022 AC3).
+    # Write audit event for each gating decision.
+    # Record both the original and effective trust tiers.
     if _db_path:
         async with open_db(_db_path) as conn:
             await insert_audit_event(
@@ -380,7 +380,7 @@ async def gate(
     }
 
 
-# Decision normalization map for the confirm tool (US-019).
+# Decision normalization map for the confirm tool.
 _DECISION_MAP: dict[str, str] = {
     "approve": "approve",
     "a": "approve",
@@ -434,8 +434,8 @@ async def confirm(
     # Determine the high-level outcome: allow or deny.
     outcome = "deny" if normalized == "deny" else "allow"
 
-    # US-020: create allowlist rule for always_allow / always_allow_global
-    # when allowlist_learning is enabled.
+    # Create allowlist rule for always_allow / always_allow_global when
+    # allowlist_learning is enabled.
     allowlist_created = False
     allowlist_rule_id: int | None = None
 

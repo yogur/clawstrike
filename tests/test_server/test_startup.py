@@ -1,4 +1,4 @@
-"""Tests for US-002: Skill Mode MCP Server Startup — health, init_server, tool registration."""
+"""Tests for Skill Mode MCP Server Startup — health, init_server, tool registration."""
 
 from __future__ import annotations
 

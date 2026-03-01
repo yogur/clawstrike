@@ -74,7 +74,7 @@ async def open_db(path: str | Path) -> AsyncIterator[aiosqlite.Connection]:
 
 
 # ---------------------------------------------------------------------------
-# Synchronous startup initializer (US-023)
+# Synchronous startup initializer
 # ---------------------------------------------------------------------------
 
 
@@ -213,7 +213,7 @@ async def set_contact_trust_level(
 
 
 # ---------------------------------------------------------------------------
-# Action Allowlist (US-020)
+# Action Allowlist
 # ---------------------------------------------------------------------------
 
 
@@ -317,7 +317,7 @@ async def insert_audit_event(
 
 
 # ---------------------------------------------------------------------------
-# Audit Event Query (US-028)
+# Audit Event Query
 # ---------------------------------------------------------------------------
 
 #: Column order for CSV export — matches the DDL declaration order.

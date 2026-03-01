@@ -142,13 +142,13 @@ class ClawStrikeConfig(BaseModel):
 
     mode: ClawStrikeMode = ClawStrikeMode.SKILL
     mcp: McpConfig = Field(default_factory=McpConfig)
-    # proxy block is always parsed and validated, even in skill mode (US-001 AC).
+    # proxy block is always parsed and validated, even in skill mode.
     proxy: ProxyConfig = Field(default_factory=ProxyConfig)
     classifier: ClassifierConfig = Field(default_factory=ClassifierConfig)
     trust: TrustConfig = Field(default_factory=TrustConfig)
     action_gating: ActionGatingConfig = Field(default_factory=ActionGatingConfig)
     audit: AuditConfig = Field(default_factory=AuditConfig)
-    # llm_judge block is always parsed and validated, even when disabled (US-001 AC).
+    # llm_judge block is always parsed and validated, even when disabled.
     llm_judge: LlmJudgeConfig = Field(default_factory=LlmJudgeConfig)
 
 

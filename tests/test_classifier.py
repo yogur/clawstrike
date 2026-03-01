@@ -1,4 +1,4 @@
-"""Tests for US-005 / US-006: Classifier inference (all mocked — no model download)."""
+"""Tests for Classifier inference (all mocked — no model download)."""
 
 from __future__ import annotations
 
