@@ -340,6 +340,107 @@ def logs(
 
 
 @app.command()
+def init(
+    force: Annotated[
+        bool,
+        typer.Option("--force", help="Overwrite an existing clawstrike.yaml."),
+    ] = False,
+    mcp: Annotated[
+        bool,
+        typer.Option("--mcp", help="Enable MCP server (mcp.enabled: true)."),
+    ] = False,
+) -> None:
+    """Create clawstrike.yaml with secure defaults and restricted file permissions."""
+    config_path = Path("clawstrike.yaml")
+    data_dir = Path("data")
+
+    if config_path.exists() and not force:
+        typer.echo(
+            "clawstrike.yaml already exists. Use --force to overwrite.",
+            err=True,
+        )
+        raise typer.Exit(code=1)
+
+    mcp_enabled = "true" if mcp else "false"
+
+    config_content = f"""\
+clawstrike:
+  # Operating mode. Only 'skill' is supported in the MVP.
+  mode: skill
+
+  # MCP server configuration.
+  # Set enabled: true for MCP-capable agent deployments.
+  # Set enabled: false (default) for CLI/OpenClaw deployments.
+  mcp:
+    enabled: {mcp_enabled}
+
+  # Classifier configuration.
+  classifier:
+    # 'multilingual' (86M) or 'english-only' (22M).
+    model: multilingual
+
+  # Trust tier configuration.
+  trust:
+    # Default trust levels per channel type.
+    channel_defaults:
+      owner_dm: high
+      trusted_group: medium
+      public_group: low
+      email_body: low
+      webhook: untrusted
+      skill_input: untrusted
+
+    # Number of safe interactions before a contact is auto-promoted.
+    auto_promote_after: 5
+
+    # Static contact trust overrides (bypasses dynamic registry).
+    # 'trusted' forces HIGH trust; 'blocked' rejects all input without classification.
+    # Example:
+    # contacts:
+    #   alice@example.com: trusted
+    #   spammer@malicious.io: blocked
+
+  # Action gating configuration.
+  action_gating:
+    enabled: true
+
+    # allowlist_learning: false prevents the agent from creating persistent
+    # allow rules. Recommended for most deployments.
+    allowlist_learning: false
+
+    # Block always_allow decisions in sessions flagged for elevated scrutiny.
+    guard_allowlist_on_flag: true
+
+    # Static pre-approved actions (checked before the decision matrix).
+    # Example:
+    # static_rules:
+    #   - action_type: calendar_read
+    #     source_scope: global
+    #   - action_type: send_email
+    #     source_scope: owner@example.com
+
+  # Audit log configuration.
+  audit:
+    enabled: true
+    retention_days: 90
+    db_path: ./data/audit.db
+    # Set to false to store only SHA-256 hashes of input (no raw text snippets).
+    log_raw_input: true
+    raw_input_max_chars: 200
+"""
+
+    # Create the data/ directory with restricted permissions (owner only).
+    data_dir.mkdir(mode=0o700, parents=True, exist_ok=True)
+
+    # Write the config file.
+    config_path.write_text(config_content, encoding="utf-8")
+    # Restrict to owner read/write only.
+    config_path.chmod(0o600)
+
+    typer.echo("Created clawstrike.yaml (mode 600). Writable only by the current user.")
+
+
+@app.command()
 def trust() -> None:
     """Manually trust a contact."""
     typer.echo("Not yet implemented.", err=True)

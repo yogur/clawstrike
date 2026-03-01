@@ -903,3 +903,174 @@ def test_allowlist_list_shows_both_config_and_db_rules(tmp_path: Path) -> None:
     assert "calendar_read" in result.output
     assert "db" in result.output
     assert "file_write" in result.output
+
+
+# ---------------------------------------------------------------------------
+# `clawstrike init`
+# ---------------------------------------------------------------------------
+
+
+def test_init_creates_config_file(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """init creates clawstrike.yaml in the working directory."""
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0
+    assert (tmp_path / "clawstrike.yaml").exists()
+
+
+def test_init_output_message(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """init prints the expected confirmation message to stdout."""
+    monkeypatch.chdir(tmp_path)
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 0
+    assert "Created clawstrike.yaml (mode 600)" in result.output
+    assert "Writable only by the current user" in result.output
+
+
+def test_init_file_permissions_600(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """init sets clawstrike.yaml permissions to 0o600."""
+    monkeypatch.chdir(tmp_path)
+
+    runner.invoke(app, ["init"])
+
+    mode = (tmp_path / "clawstrike.yaml").stat().st_mode & 0o777
+    assert mode == 0o600
+
+
+def test_init_creates_data_dir(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """init creates the data/ directory."""
+    monkeypatch.chdir(tmp_path)
+
+    runner.invoke(app, ["init"])
+
+    assert (tmp_path / "data").is_dir()
+
+
+def test_init_data_dir_permissions_700(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """init sets data/ directory permissions to 0o700."""
+    monkeypatch.chdir(tmp_path)
+
+    runner.invoke(app, ["init"])
+
+    mode = (tmp_path / "data").stat().st_mode & 0o777
+    assert mode == 0o700
+
+
+def test_init_aborts_if_file_exists(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """init exits 1 with an informational message when clawstrike.yaml already exists."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "clawstrike.yaml").write_text("existing content")
+
+    result = runner.invoke(app, ["init"])
+
+    assert result.exit_code == 1
+    assert "already exists" in result.output
+
+
+def test_init_force_overwrites_existing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--force overwrites an existing clawstrike.yaml."""
+    monkeypatch.chdir(tmp_path)
+    (tmp_path / "clawstrike.yaml").write_text("old content")
+
+    result = runner.invoke(app, ["init", "--force"])
+
+    assert result.exit_code == 0
+    content = (tmp_path / "clawstrike.yaml").read_text()
+    assert "old content" not in content
+    assert "clawstrike:" in content
+
+
+def test_init_secure_defaults_no_mcp_flag(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Without --mcp, generated config has mcp.enabled: false and secure gating defaults."""
+    monkeypatch.chdir(tmp_path)
+
+    runner.invoke(app, ["init"])
+
+    content = (tmp_path / "clawstrike.yaml").read_text()
+    assert "enabled: false" in content
+    assert "allowlist_learning: false" in content
+    assert "guard_allowlist_on_flag: true" in content
+
+
+def test_init_mcp_flag_enables_mcp(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """--mcp generates config with mcp.enabled: true."""
+    monkeypatch.chdir(tmp_path)
+
+    runner.invoke(app, ["init", "--mcp"])
+
+    content = (tmp_path / "clawstrike.yaml").read_text()
+    assert "enabled: true" in content
+
+
+def test_init_generated_yaml_is_valid(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generated clawstrike.yaml is parseable as valid YAML."""
+    monkeypatch.chdir(tmp_path)
+
+    runner.invoke(app, ["init"])
+
+    content = (tmp_path / "clawstrike.yaml").read_text()
+    parsed = yaml.safe_load(content)
+    assert isinstance(parsed, dict)
+    assert "clawstrike" in parsed
+
+
+def test_init_generated_config_passes_validation(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generated clawstrike.yaml passes ClawStrike config validation."""
+    from clawstrike.config import load_config
+
+    monkeypatch.chdir(tmp_path)
+    runner.invoke(app, ["init"])
+
+    cfg = load_config(tmp_path / "clawstrike.yaml")
+    assert cfg.mode.value == "skill"
+    assert cfg.mcp.enabled is False
+    assert cfg.action_gating.allowlist_learning is False
+    assert cfg.action_gating.guard_allowlist_on_flag is True
+
+
+def test_init_includes_trust_contacts_example(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generated config includes a commented-out trust.contacts example."""
+    monkeypatch.chdir(tmp_path)
+
+    runner.invoke(app, ["init"])
+
+    content = (tmp_path / "clawstrike.yaml").read_text()
+    assert "contacts:" in content
+    assert "trusted" in content
+
+
+def test_init_includes_static_rules_example(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Generated config includes a commented-out action_gating.static_rules example."""
+    monkeypatch.chdir(tmp_path)
+
+    runner.invoke(app, ["init"])
+
+    content = (tmp_path / "clawstrike.yaml").read_text()
+    assert "static_rules:" in content
+    assert "action_type:" in content

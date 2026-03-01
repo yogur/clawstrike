@@ -303,19 +303,19 @@
 
 ---
 
-### US-042: Secure Config Bootstrapping (`clawstrike init`)
+### US-042: Secure Config Bootstrapping (`clawstrike init`) ✅ DONE
 
 **Description:** As a ClawStrike user, I want an init command that creates a config file with secure defaults and file permissions so that I can bootstrap a hardened setup without manual steps.
 
 **Acceptance Criteria:**
-- [ ] `clawstrike init` creates `clawstrike.yaml` in the working directory with all defaults and descriptive inline comments
-- [ ] If `clawstrike.yaml` already exists, the command aborts with an informational message and exits with code 1 (unless `--force` is passed, which overwrites the existing file)
-- [ ] The generated config uses secure defaults: `allowlist_learning: false`, `guard_allowlist_on_flag: true`, `mcp.enabled: false` (appropriate for CLI/OpenClaw deployments)
-- [ ] The `--mcp` flag generates the config with `mcp.enabled: true` (for MCP-capable agent deployments)
-- [ ] The config file is written with `0o600` permissions (owner read/write only)
-- [ ] The `data/` directory is created with `0o700` permissions
-- [ ] Output to stdout confirms creation: `Created clawstrike.yaml (mode 600). Writable only by the current user.`
-- [ ] The generated config includes a commented-out `trust.contacts` example and a commented-out `action_gating.static_rules` example
+- [x] `clawstrike init` creates `clawstrike.yaml` in the working directory with all defaults and descriptive inline comments
+- [x] If `clawstrike.yaml` already exists, the command aborts with an informational message and exits with code 1 (unless `--force` is passed, which overwrites the existing file)
+- [x] The generated config uses secure defaults: `allowlist_learning: false`, `guard_allowlist_on_flag: true`, `mcp.enabled: false` (appropriate for CLI/OpenClaw deployments)
+- [x] The `--mcp` flag generates the config with `mcp.enabled: true` (for MCP-capable agent deployments)
+- [x] The config file is written with `0o600` permissions (owner read/write only)
+- [x] The `data/` directory is created with `0o700` permissions
+- [x] Output to stdout confirms creation: `Created clawstrike.yaml (mode 600). Writable only by the current user.`
+- [x] The generated config includes a commented-out `trust.contacts` example and a commented-out `action_gating.static_rules` example
 
 ---
 

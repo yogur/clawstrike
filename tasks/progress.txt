@@ -559,3 +559,22 @@
   - `list_allowlist_rules` follows the same sync/stdlib pattern as `query_audit_events` — no event loop needed for read-only CLI access.
   - `make_cfg_with_static_rules()` helper follows the same pattern as `make_cfg_with_trust()` and `make_cfg_with_contacts()` — minimal_config + extra dict + write_yaml + load_config.
 ---
+
+## [2026-03-01] - US-042
+- Implemented `clawstrike init` command in `src/clawstrike/cli.py`
+- Command creates `clawstrike.yaml` in the CWD with secure defaults and descriptive inline comments
+- Flags: `--force` (overwrite existing), `--mcp` (set `mcp.enabled: true` for MCP deployments)
+- File permissions: `0o600` for `clawstrike.yaml`, `0o700` for `data/` directory
+- Generated config includes commented-out `trust.contacts` and `action_gating.static_rules` examples
+- Added 14 tests covering all acceptance criteria in `tests/test_cli.py`
+- Files changed:
+  - `src/clawstrike/cli.py` — added `init` command
+  - `tests/test_cli.py` — added 14 tests for `init`
+  - `tasks/clawstrike-user-stories.md` — marked US-042 complete
+- **Learnings for future iterations:**
+  - `clawstrike init` uses CWD via `Path("clawstrike.yaml")` — no `--config` flag since we're creating, not reading
+  - `monkeypatch.chdir(tmp_path)` is essential in init tests (command creates files relative to CWD)
+  - f-string template for YAML generation keeps comments intact (yaml.dump() strips comments); use a raw string template instead
+  - `Path.chmod(0o600)` must be called after `write_text()` — write_text uses the process umask, chmod corrects it
+  - `mkdir(mode=0o700)` sets the directory permissions reliably on Linux/WSL2
+---
