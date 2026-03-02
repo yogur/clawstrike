@@ -578,3 +578,23 @@
   - `Path.chmod(0o600)` must be called after `write_text()` — write_text uses the process umask, chmod corrects it
   - `mkdir(mode=0o700)` sets the directory permissions reliably on Linux/WSL2
 ---
+
+## [2026-03-02] - US-032
+- What was implemented:
+  - Created `tests/test_server/test_e2e.py` with one E2E test covering the full classify → gate pipeline for a benign owner DM message
+  - Test pre-seeds the owner contact in the DB (via `get_or_create_contact` directly) so classify sees them as a known contact with HIGH trust (owner_dm channel default), not first-contact UNTRUSTED
+  - Verifies: classify decision="pass", trust_level="high", is_first_contact=False, content_source_mismatch=False
+  - Verifies: gate recommendation="allow", risk_level="low" (calendar_read), trust_level="high"
+  - Verifies: classify + gate round trip < 110ms (mock classifier eliminates inference time; measures pipeline + DB + MCP overhead)
+  - Verifies: audit log contains exactly 1 "classify" event (decision: pass) and 1 "action_gate" event (decision: allow)
+- Files changed:
+  - `tests/test_server/test_e2e.py` — new file, 1 test
+  - `tasks/clawstrike-user-stories.md` — marked US-032 as DONE
+- 306 tests pass; ruff check and ruff format clean
+- **Learnings for future iterations:**
+  - E2E tests live in `tests/test_server/test_e2e.py` and inherit the `reset_server_config` autouse fixture (mock classifier + global reset) and `cfg` fixture (isolated DB path) from `tests/test_server/conftest.py`
+  - Pre-seeding the contact via `open_db` + `get_or_create_contact` before `init_server(cfg)` is the correct pattern for tests that need non-first-contact HIGH trust. Direct DB seeding avoids extra audit events that would break "exactly N events" assertions
+  - The gate tool resolves trust from channel_type directly (no contact DB lookup), so gate always sees HIGH trust for owner_dm regardless of first-contact status. Only classify has first-contact override behavior
+  - The "input_classification" audit event type in the PRD/user stories corresponds to "classify" in the actual implementation
+  - `dict(aiosqlite.Row)` produces a plain dict keyed by column names — safe for assertion
+---

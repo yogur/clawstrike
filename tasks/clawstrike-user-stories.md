@@ -462,16 +462,16 @@
 
 ## Epic 7: End-to-End Scenarios
 
-### US-032: E2E — Benign Owner DM Passthrough
+### US-032: E2E — Benign Owner DM Passthrough ✅ DONE
 
 **Description:** As a ClawStrike user, I want a normal message from my own account to flow through the entire pipeline with no interference so that ClawStrike is invisible during normal usage.
 
 **Acceptance Criteria:**
-- [ ] A benign message from the owner's DM channel passes classification (score < flag threshold)
-- [ ] Trust resolves to `high` (owner DM channel default)
-- [ ] A subsequent `gate` tool call for a low-risk action (e.g., calendar read) returns `recommendation: "allow"`
-- [ ] The full classify + gate round trip completes with <110ms total overhead (MCP transport included)
-- [ ] The audit log contains one `input_classification` event (decision: pass) and one `action_gate` event (recommendation: allow)
+- [x] A benign message from the owner's DM channel passes classification (score < flag threshold)
+- [x] Trust resolves to `high` (owner DM channel default)
+- [x] A subsequent `gate` tool call for a low-risk action (e.g., calendar read) returns `recommendation: "allow"`
+- [x] The full classify + gate round trip completes with <110ms total overhead (MCP transport included)
+- [x] The audit log contains one `input_classification` event (decision: pass) and one `action_gate` event (recommendation: allow)
 
 ---
 
