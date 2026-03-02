@@ -629,3 +629,17 @@
   - Gate resolves trust independently from channel_type using `resolve_trust_level` (channel defaults only), never using first-contact logic. This means the base_trust in gate can differ from the classify trust if the contact happened to be first-contact during classify.
   - The audit `action_gate` event stores `trust_level` as the **effective** (post-downgrade) trust, and `original_trust_level` in `details_json` as the base channel-resolved trust — check both in tests.
 ---
+
+## [2026-03-02] - US-035
+- What was implemented:
+  - E2E test `test_e2e_first_contact_to_auto_promotion` in `tests/e2e/test_e2e.py`
+  - Verifies the full lifecycle: first-contact UNTRUSTED → 5 benign interactions → auto-promotion to MEDIUM → gate returns allow for low-risk action
+- Files changed:
+  - `tests/e2e/test_e2e.py` — added US-035 E2E test
+  - `tasks/clawstrike-user-stories.md` — marked US-035 complete
+- **Learnings for future iterations:**
+  - The auto-promote loop: contact is created with `interaction_count=1`; first-contact path skips `increment_interaction`; calls 2–N increment the count; auto-promote fires when `contact.trust_level == "auto"` AND `updated.interaction_count >= auto_promote_after` (default 5). So 5 total classify calls trigger promotion on the 5th.
+  - The `is_first_contact` column in `audit_events` is stored as INTEGER (0/1) in SQLite; compare with `== 1` not `is True` when reading raw rows back.
+  - E2E tests that exercise the default classifier score (0.0 benign) don't need to explicitly reference the `reset_server_config` fixture as a parameter; the `autouse=True` fixture in `tests/e2e/conftest.py` applies it automatically. Only reference it as a parameter when you need to override `mock_clf.classify.return_value`.
+  - No pre-registration of the contact is needed when the test intentionally exercises first-contact behavior (unlike test_e2e_benign_owner_dm_passthrough which pre-registers to skip first-contact override).
+---

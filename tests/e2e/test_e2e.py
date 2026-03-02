@@ -369,3 +369,118 @@ async def test_e2e_flagged_session_escalates_gate_recommendation(
     assert gate_details["content_source_mismatch"] is True
     assert gate_details["risk_level"] == "high"
     assert gate_details["recommendation"] == "block"
+
+
+# ---------------------------------------------------------------------------
+# US-035: E2E — First Contact → Repeated Interaction → Auto-Promotion
+# ---------------------------------------------------------------------------
+
+
+async def test_e2e_first_contact_to_auto_promotion(
+    cfg: ClawStrikeConfig,
+    tmp_path: Path,
+) -> None:
+    """Progressive trust relaxation: first contact untrusted → auto-promoted to medium.
+
+    A new Discord contact sends 5 benign messages to a trusted-group channel.
+    The first message triggers the first-contact override (UNTRUSTED). After 5
+    cumulative benign interactions the system auto-promotes the contact to the
+    channel's default trust level (MEDIUM). A subsequent gate call confirms
+    that MEDIUM trust thresholds and gating recommendations are applied.
+
+    Acceptance criteria verified:
+    - First message treated as untrusted (first-contact override)
+    - 5 benign interactions trigger auto-promotion to medium trust
+    - After auto-promotion, gate returns medium trust and allows a low-risk action
+    - Audit log: 5 classify events (is_first_contact=True on the first) and
+      exactly one trust_update event recording the auto-promotion
+    """
+    import clawstrike.mcpserver as srv
+
+    source_id = "discord:new_user_123"
+    session_id = "e2e-session-auto-promote"
+    channel_type = "trusted_group"
+    db_path = str(cfg.audit.db_path)
+
+    # The autouse mock classifier returns score=0.0 (benign) by default.
+    # All 5 interactions will produce pass decisions — no flags, no blocks.
+    srv.init_server(cfg)
+
+    # --- 5 benign classify calls to trigger auto-promotion ---
+    first_result = None
+    for i in range(5):
+        result = await srv.mcp.call_tool(
+            "classify",
+            {
+                "text": f"Hey, just checking in — message {i + 1}.",
+                "source_id": source_id,
+                "channel_type": channel_type,
+                "session_id": session_id,
+            },
+        )
+        if i == 0:
+            first_result = result.structured_content
+
+    # --- First-contact behavior: trust forced to UNTRUSTED ---
+    assert first_result["decision"] == "pass"
+    assert first_result["trust_level"] == "untrusted"
+    assert first_result["is_first_contact"] is True
+    assert first_result["content_source_mismatch"] is False
+
+    # --- Gate call: verify MEDIUM trust and allow recommendation after promotion ---
+    # Trusted-group channel default is MEDIUM. Auto-promotion has set the stored
+    # trust_level to "medium", so no further promotions will fire. A low-risk
+    # file_read action from a MEDIUM trust source should be auto-approved.
+    gate_result = await srv.mcp.call_tool(
+        "gate",
+        {
+            "action_description": "Read shared document links from trusted group",
+            "action_type": "file_read",
+            "session_id": session_id,
+            "source_id": source_id,
+            "channel_type": channel_type,
+        },
+    )
+    gate_data = gate_result.structured_content
+
+    assert gate_data["trust_level"] == "medium"
+    assert gate_data["effective_trust_level"] == "medium"
+    assert gate_data["risk_level"] == "low"
+    assert gate_data["recommendation"] == "allow"
+    assert gate_data["elevated_scrutiny"] is False
+    assert gate_data["content_source_mismatch"] is False
+
+    # --- Audit log verification ---
+    classify_events = await get_audit_events(db_path, event_type="classify")
+    trust_update_events = await get_audit_events(db_path, event_type="trust_update")
+
+    # Exactly 5 classify events — one per interaction.
+    assert len(classify_events) == 5
+
+    # First classify event records first-contact status and untrusted trust.
+    first_classify = dict(classify_events[0])
+    assert first_classify["is_first_contact"] == 1
+    assert first_classify["trust_level"] == "untrusted"
+    assert first_classify["decision"] == "pass"
+    assert first_classify["source_id"] == source_id
+    assert first_classify["session_id"] == session_id
+
+    # Interactions 2–5: known contact, medium trust (channel default), pass.
+    for row in classify_events[1:]:
+        row_dict = dict(row)
+        assert row_dict["is_first_contact"] == 0
+        assert row_dict["trust_level"] == "medium"
+        assert row_dict["decision"] == "pass"
+
+    # Exactly one trust_update event: the auto-promotion that fires on the 5th
+    # interaction (interaction_count reaches auto_promote_after = 5).
+    assert len(trust_update_events) == 1
+    promote_row = dict(trust_update_events[0])
+    assert promote_row["source_id"] == source_id
+    assert promote_row["trust_level"] == "medium"
+
+    promote_details = json.loads(promote_row["details_json"])
+    assert promote_details["reason"] == "auto_promote"
+    assert promote_details["previous_trust"] == "auto"
+    assert promote_details["new_trust"] == "medium"
+    assert promote_details["interaction_count"] == 5

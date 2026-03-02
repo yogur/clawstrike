@@ -505,10 +505,10 @@
 **Description:** As a ClawStrike user, I want the trust system to progressively relax restrictions on a new contact as they interact safely over time so that the system adapts to my real communication patterns.
 
 **Acceptance Criteria:**
-- [ ] First message from a new Discord user is treated as `untrusted` (first contact)
-- [ ] After 5 benign interactions (no blocks, no flags), the contact is auto-promoted to the channel's default trust level (e.g., `medium` for a trusted group)
-- [ ] After auto-promotion, the same contact's messages use `medium` trust thresholds and gating recommendations
-- [ ] The audit log contains 5 interaction events (with `is_first_contact: true` on the first) and one `trust_update` event recording the promotion
+- [x] First message from a new Discord user is treated as `untrusted` (first contact)
+- [x] After 5 benign interactions (no blocks, no flags), the contact is auto-promoted to the channel's default trust level (e.g., `medium` for a trusted group)
+- [x] After auto-promotion, the same contact's messages use `medium` trust thresholds and gating recommendations
+- [x] The audit log contains 5 interaction events (with `is_first_contact: true` on the first) and one `trust_update` event recording the promotion
 
 ---
 
