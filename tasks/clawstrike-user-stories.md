@@ -475,16 +475,16 @@
 
 ---
 
-### US-033: E2E — Prompt Injection from Untrusted Email Detected
+### US-033: E2E — Prompt Injection from Untrusted Email Detected ✅ DONE
 
 **Description:** As a ClawStrike user, I want a prompt injection embedded in an email body to be detected and flagged for rejection so that indirect injection attacks via email are caught.
 
 **Acceptance Criteria:**
-- [ ] An inbound message with channel type `email_body` and a known prompt injection payload scores above the trust-modulated block threshold
-- [ ] The `classify` tool returns `decision: "block"`
-- [ ] The ClawStrike skill instructs the LLM to reject the input
-- [ ] The user is notified via the originating channel with the blocked source and score
-- [ ] The audit log records the event with `decision: "block"`, the effective threshold (lowered for untrusted), and the source metadata
+- [x] An inbound message with channel type `email_body` and a known prompt injection payload scores above the trust-modulated block threshold
+- [x] The `classify` tool returns `decision: "block"`
+- [x] The ClawStrike skill instructs the LLM to reject the input
+- [x] The user is notified via the originating channel with the blocked source and score
+- [x] The audit log records the event with `decision: "block"`, the effective threshold (lowered for untrusted), and the source metadata
 
 ---
 

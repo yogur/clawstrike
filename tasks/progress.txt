@@ -598,3 +598,18 @@
   - The "input_classification" audit event type in the PRD/user stories corresponds to "classify" in the actual implementation
   - `dict(aiosqlite.Row)` produces a plain dict keyed by column names — safe for assertion
 ---
+
+## [2026-03-02] - US-033
+- What was implemented:
+  - E2E test for prompt injection detection from an untrusted email sender
+  - Test verifies the full classify pipeline: injection scoring → UNTRUSTED first-contact trust → lowered block threshold → block decision → audit log
+- Files changed:
+  - `tests/e2e/test_e2e.py` — added `test_e2e_prompt_injection_from_untrusted_email`; added imports for `json`, `pytest`, `ClassifierResult`
+  - `tasks/clawstrike-user-stories.md` — marked US-033 as DONE
+- **Learnings for future iterations:**
+  - To override the mock classifier score in an e2e test, add `reset_server_config` as an explicit parameter to the test function (the autouse fixture yields the mock; adding it as a parameter gives access to the yielded value). Then set `reset_server_config.classify.return_value = ClassifierResult(...)` before or after `init_server(cfg)` — both work since init stores the mock object, and changing its return_value affects future calls.
+  - UNTRUSTED effective block threshold = base 0.92 + UNTRUSTED modifier (-0.10) = 0.82. LOW = 0.87. These are the thresholds to use when asserting `threshold_applied.block` in tests.
+  - First-contact senders always resolve to UNTRUSTED regardless of channel_type default. Do NOT pre-register the contact when the e2e scenario intentionally tests first-contact behavior.
+  - Content-source mismatch only fires for HIGH or MEDIUM trust senders (not UNTRUSTED), so `content_source_mismatch` is always False for untrusted first-contact scenarios.
+  - Block decisions set `elevated_scrutiny: False` in the audit `details_json` (only flag decisions set it True). Verify this in tests to confirm the audit path is correct.
+---
