@@ -2,7 +2,7 @@
 
 These tests exercise complete user-facing scenarios to verify that all
 pipeline components integrate correctly from input classification through
-action gating and audit logging.
+action gating, confirmation, and audit logging.
 """
 
 from __future__ import annotations
@@ -484,3 +484,122 @@ async def test_e2e_first_contact_to_auto_promotion(
     assert promote_details["previous_trust"] == "auto"
     assert promote_details["new_trust"] == "medium"
     assert promote_details["interaction_count"] == 5
+
+
+# ---------------------------------------------------------------------------
+# US-036: E2E — Allowlist Reduces Prompt Fatigue Over Time
+# ---------------------------------------------------------------------------
+
+
+async def test_e2e_allowlist_reduces_prompt_fatigue(
+    cfg: ClawStrikeConfig,
+    tmp_path: Path,
+) -> None:
+    """Allowlist learning eliminates repeated confirmation prompts for approved actions.
+
+    A medium-trust source requests a high-risk action (send_email). The gate
+    tool returns prompt_user per the decision matrix (high + medium → prompt_user).
+    The user approves with 'always_allow', creating a source-scoped allowlist
+    rule. Subsequent gate calls for the same action return 'allow' immediately
+    without prompting, with the audit log referencing the rule ID.
+
+    Removing the rule from the database directly (no CLI command exists for
+    this) restores the prompt_user recommendation for subsequent gate calls.
+
+    Acceptance criteria verified:
+    - Initial gate for send_email from medium-trust source → prompt_user
+    - confirm with always_allow creates a source-scoped allowlist rule
+    - Subsequent gate for the same action → allow (allowlisted: True, rule ID)
+    - Audit log for auto-allowed event references the allowlist rule ID
+    - After rule deletion from DB, gate returns prompt_user again
+    """
+    import clawstrike.mcpserver as srv
+    from clawstrike.db import open_db
+
+    source_id = "colleague@company.com"
+    session_id = "e2e-session-allowlist-learning"
+    channel_type = "trusted_group"
+    db_path = str(cfg.audit.db_path)
+
+    # ActionGatingConfig.allowlist_learning defaults to True, so always_allow
+    # decisions will create persistent allowlist rules without extra config.
+    srv.init_server(cfg)
+
+    gate_args = {
+        "action_description": "Send weekly report to team@company.com",
+        "action_type": "send_email",
+        "session_id": session_id,
+        "source_id": source_id,
+        "channel_type": channel_type,
+    }
+
+    # --- Step 1: Initial gate call — prompt_user for high-risk from medium trust ---
+    # Decision matrix: high-risk + MEDIUM trust → prompt_user.
+    g1 = await srv.mcp.call_tool("gate", gate_args)
+    g1_data = g1.structured_content
+
+    assert g1_data["recommendation"] == "prompt_user"
+    assert g1_data["risk_level"] == "high"
+    assert g1_data["trust_level"] == "medium"
+    assert g1_data["allowlisted"] is False
+    assert g1_data["allowlist_rule_id"] is None
+
+    # --- Step 2: User approves with always_allow → source-scoped rule created ---
+    confirm_result = await srv.mcp.call_tool(
+        "confirm",
+        {
+            "action_type": "send_email",
+            "action_description": "Send weekly report to team@company.com",
+            "session_id": session_id,
+            "source_id": source_id,
+            "channel_type": channel_type,
+            "decision": "always_allow",
+        },
+    )
+    confirm_data = confirm_result.structured_content
+
+    assert confirm_data["allowlist_created"] is True
+    assert confirm_data["user_decision"] == "always_allow"
+    assert confirm_data["guard_applied"] is False
+
+    rule_id = confirm_data["allowlist_rule_id"]
+    assert rule_id is not None
+
+    # --- Step 3: Gate called again — allow immediately, no prompt required ---
+    g2 = await srv.mcp.call_tool("gate", gate_args)
+    g2_data = g2.structured_content
+
+    assert g2_data["recommendation"] == "allow"
+    assert g2_data["allowlisted"] is True
+    assert g2_data["allowlist_rule_id"] == rule_id
+    assert g2_data["allowlist_source"] == "db"
+
+    # --- Step 4: Audit log for auto-allowed event references the rule ID ---
+    gate_events = await get_audit_events(db_path, event_type="action_gate")
+    # Two gate events: initial prompt_user + subsequent auto-allow.
+    assert len(gate_events) == 2
+
+    auto_allow_row = dict(gate_events[1])
+    assert auto_allow_row["decision"] == "allow"
+    assert auto_allow_row["source_id"] == source_id
+    assert auto_allow_row["session_id"] == session_id
+
+    auto_allow_details = json.loads(auto_allow_row["details_json"])
+    assert auto_allow_details["allowlisted"] is True
+    assert auto_allow_details["allowlist_rule_id"] == rule_id
+    assert auto_allow_details["allowlist_source"] == "db"
+
+    # --- Step 5: Delete rule directly from DB → prompt_user restored ---
+    # There is no `clawstrike allowlist remove` CLI command. Removing a
+    # dynamic DB rule requires direct database access (deleting the row from
+    # the action_allowlist table) or clearing the DB file entirely.
+    async with open_db(db_path) as conn:
+        await conn.execute("DELETE FROM action_allowlist WHERE id = ?", (rule_id,))
+        await conn.commit()
+
+    g3 = await srv.mcp.call_tool("gate", gate_args)
+    g3_data = g3.structured_content
+
+    assert g3_data["recommendation"] == "prompt_user"
+    assert g3_data["allowlisted"] is False
+    assert g3_data["allowlist_rule_id"] is None

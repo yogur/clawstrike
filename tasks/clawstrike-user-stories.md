@@ -512,16 +512,16 @@
 
 ---
 
-### US-036: E2E — Allowlist Reduces Prompt Fatigue Over Time
+### US-036: E2E — Allowlist Reduces Prompt Fatigue Over Time ✅ DONE
 
 **Description:** As a ClawStrike user, I want my approval history to reduce unnecessary confirmation prompts so that ClawStrike becomes less intrusive as it learns my workflows.
 
 **Acceptance Criteria:**
-- [ ] User is prompted for a `high`-risk action (e.g., send email to `team@company.com`) from a medium-trust source
-- [ ] User responds "always allow" — an allowlist rule is created for this action type + source
-- [ ] The next time the same action type occurs from the same source, the `gate` tool returns `recommendation: "allow"` without prompting
-- [ ] The audit log for the auto-allowed event references the allowlist rule ID that authorized it
-- [ ] If the user later runs `clawstrike allowlist remove <id>`, subsequent identical actions trigger a prompt again
+- [x] User is prompted for a `high`-risk action (e.g., send email to `team@company.com`) from a medium-trust source
+- [x] User responds "always allow" — an allowlist rule is created for this action type + source
+- [x] The next time the same action type occurs from the same source, the `gate` tool returns `recommendation: "allow"` without prompting
+- [x] The audit log for the auto-allowed event references the allowlist rule ID that authorized it
+- [x] If the allowlist rule is removed from the database (by deleting the row directly from the `action_allowlist` table — there is no `clawstrike allowlist remove` CLI command; see PRD Section 4.5), subsequent identical actions trigger a `prompt_user` recommendation again
 
 ---
 

@@ -643,3 +643,22 @@
   - E2E tests that exercise the default classifier score (0.0 benign) don't need to explicitly reference the `reset_server_config` fixture as a parameter; the `autouse=True` fixture in `tests/e2e/conftest.py` applies it automatically. Only reference it as a parameter when you need to override `mock_clf.classify.return_value`.
   - No pre-registration of the contact is needed when the test intentionally exercises first-contact behavior (unlike test_e2e_benign_owner_dm_passthrough which pre-registers to skip first-contact override).
 ---
+
+## [2026-03-02] - US-036
+- What was implemented:
+  - E2E test `test_e2e_allowlist_reduces_prompt_fatigue` in `tests/e2e/test_e2e.py`
+  - Tests the full gate → confirm(always_allow) → gate allowlist-bypass flow
+  - Verifies: initial gate for send_email (high-risk) from trusted_group (MEDIUM) → prompt_user; confirm with always_allow creates source-scoped DB rule; subsequent gate returns allow with allowlisted=True and the rule ID; audit event details reference the rule ID; deleting the rule from the DB directly restores prompt_user
+  - Updated US-036 last AC: replaced the non-existent `clawstrike allowlist remove` CLI reference with "delete row directly from action_allowlist table"
+- Files changed:
+  - `tests/e2e/test_e2e.py` — added US-036 E2E test; updated module docstring
+  - `tasks/clawstrike-user-stories.md` — marked US-036 ✅ DONE; updated last AC to reflect no CLI removal command
+  - `tasks/progress.txt` — this entry
+- 310 tests pass; ruff check and ruff format clean
+- **Learnings for future iterations:**
+  - `ActionGatingConfig.allowlist_learning` defaults to `True` in `config.py` (line 133) — the default `cfg` fixture therefore already enables allowlist rule creation; no extra config setup needed for tests that exercise `always_allow`.
+  - The gate tool does NOT perform a contact registry lookup (no `get_or_create_contact`); trust is resolved purely from `channel_type` → no pre-seeding required for gate-focused E2E tests.
+  - Deleting rows from SQLite inside an async test: use `async with open_db(db_path) as conn: await conn.execute("DELETE ...")` followed by `await conn.commit()`. The commit is required because `open_db` sets WAL mode implicitly but does not auto-commit.
+  - The `gate` response `allowlist_source` field is `"db"` for rules created via `confirm` and `"config"` for static config rules — verify this in tests that exercise allowlist bypass to confirm the correct code path ran.
+  - User story ACs that reference CLI commands should be audited against the actual CLI surface when adapting them. The `allowlist remove` command was never implemented (PRD 4.5 deliberately omits it); the AC was updated to reflect the direct-DB approach.
+---
