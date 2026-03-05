@@ -74,7 +74,7 @@ class ClassifierConfig(BaseModel):
 class McpConfig(BaseModel):
     model_config = ConfigDict(extra="allow")
 
-    enabled: bool = True
+    enabled: bool = False
 
 
 class ProxyConfig(BaseModel):

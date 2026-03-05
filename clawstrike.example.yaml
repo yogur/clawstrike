@@ -2,7 +2,7 @@ clawstrike:
   mode: "skill"  # Only "skill" is supported in the MVP.
 
   mcp:
-    enabled: true  # set to false if your agent uses CLI integration instead
+    enabled: false  # set to true if your agent connects via MCP instead of CLI
 
   classifier:
     # Required. Choose the prompt injection detection model.

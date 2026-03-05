@@ -146,7 +146,7 @@ def test_defaults_mode_and_mcp(tmp_path: Path) -> None:
     config = load_config(cfg_file)
 
     assert config.mode == ClawStrikeMode.SKILL
-    assert config.mcp.enabled is True
+    assert config.mcp.enabled is False
 
 
 def test_defaults_trust(tmp_path: Path) -> None:
@@ -350,7 +350,7 @@ def test_empty_yaml_uses_all_defaults(tmp_path: Path) -> None:
 
     config = load_config(cfg_file)
     assert config.classifier.model == ClassifierModel.MULTILINGUAL
-    assert config.mcp.enabled is True
+    assert config.mcp.enabled is False
 
 
 def test_partial_config_with_audit_override(tmp_path: Path) -> None:
@@ -404,12 +404,12 @@ def test_mcp_old_transport_key_warns(
     captured = capsys.readouterr()
     assert "transport" in captured.err
     assert "Warning" in captured.err
-    assert config.mcp.enabled is True  # default still applies
+    assert config.mcp.enabled is False  # default still applies
 
 
 def test_clawstrike_config_no_args_uses_defaults() -> None:
     """ClawStrikeConfig() with no arguments uses all defaults (no config file needed)."""
     config = ClawStrikeConfig()
     assert config.classifier.model == ClassifierModel.MULTILINGUAL
-    assert config.mcp.enabled is True
+    assert config.mcp.enabled is False
     assert config.mode == ClawStrikeMode.SKILL

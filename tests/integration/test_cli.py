@@ -87,7 +87,7 @@ def _mock_classifier() -> MagicMock:
 
 
 def test_start_skill_mode_logs_banner_and_runs(tmp_path: Path) -> None:
-    cfg_file = write_yaml(tmp_path, minimal_config())
+    cfg_file = write_yaml(tmp_path, minimal_config({"mcp": {"enabled": True}}))
 
     with (
         patch("clawstrike.mcpserver.mcp.run") as mock_run,
@@ -105,7 +105,10 @@ def test_start_skill_mode_logs_banner_and_runs(tmp_path: Path) -> None:
 
 @pytest.mark.parametrize("model", ["multilingual", "english-only"])
 def test_start_banner_includes_classifier_model(tmp_path: Path, model: str) -> None:
-    cfg_file = write_yaml(tmp_path, minimal_config({"classifier": {"model": model}}))
+    cfg_file = write_yaml(
+        tmp_path,
+        minimal_config({"mcp": {"enabled": True}, "classifier": {"model": model}}),
+    )
 
     with (
         patch("clawstrike.mcpserver.mcp.run"),
@@ -125,7 +128,7 @@ def test_start_banner_includes_classifier_model(tmp_path: Path, model: str) -> N
 
 
 def test_start_classifier_load_failure_exits_1(tmp_path: Path) -> None:
-    cfg_file = write_yaml(tmp_path, minimal_config())
+    cfg_file = write_yaml(tmp_path, minimal_config({"mcp": {"enabled": True}}))
 
     with (
         patch("clawstrike.mcpserver.mcp.run"),
@@ -146,7 +149,7 @@ def test_start_classifier_load_failure_exits_1(tmp_path: Path) -> None:
 
 
 def test_start_calls_init_server(tmp_path: Path) -> None:
-    cfg_file = write_yaml(tmp_path, minimal_config())
+    cfg_file = write_yaml(tmp_path, minimal_config({"mcp": {"enabled": True}}))
 
     with (
         patch("clawstrike.mcpserver.mcp.run"),
@@ -166,20 +169,16 @@ def test_start_calls_init_server(tmp_path: Path) -> None:
 def test_start_no_config_uses_defaults(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """When the default clawstrike.yaml is absent, start uses all defaults."""
-    # Run from a directory that has no clawstrike.yaml
+    """When the default clawstrike.yaml is absent, start uses all defaults.
+
+    With mcp.enabled defaulting to false, start exits 0 with an info message.
+    """
     monkeypatch.chdir(tmp_path)
 
-    with (
-        patch("clawstrike.mcpserver.mcp.run") as mock_run,
-        patch(
-            "clawstrike.mcpserver.create_classifier", return_value=_mock_classifier()
-        ),
-    ):
-        result = runner.invoke(app, ["start"])
+    result = runner.invoke(app, ["start"])
 
     assert result.exit_code == 0
-    mock_run.assert_called_once_with(transport="stdio")
+    assert "mcp.enabled" in result.output.lower()
 
 
 # ---------------------------------------------------------------------------
@@ -212,7 +211,7 @@ def test_health_outputs_json(tmp_path: Path) -> None:
     assert data["status"] == "ok"
     assert data["mode"] == "skill"
     assert data["classifier"] == "multilingual"
-    assert data["mcp_enabled"] is True
+    assert data["mcp_enabled"] is False
 
 
 def test_health_reflects_mcp_disabled(tmp_path: Path) -> None:
@@ -352,7 +351,9 @@ def test_start_logs_audit_db_created(tmp_path: Path) -> None:
     """start logs '(created)' when the audit DB is new."""
     cfg_file = write_yaml(
         tmp_path,
-        minimal_config({"audit": {"db_path": str(tmp_path / "new.db")}}),
+        minimal_config(
+            {"mcp": {"enabled": True}, "audit": {"db_path": str(tmp_path / "new.db")}}
+        ),
     )
 
     with (
@@ -376,7 +377,7 @@ def test_start_logs_audit_db_ready_with_event_count(tmp_path: Path) -> None:
 
     cfg_file = write_yaml(
         tmp_path,
-        minimal_config({"audit": {"db_path": str(db_path)}}),
+        minimal_config({"mcp": {"enabled": True}, "audit": {"db_path": str(db_path)}}),
     )
 
     with (

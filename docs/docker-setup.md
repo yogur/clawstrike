@@ -1,6 +1,6 @@
 # Docker Setup Guide
 
-This guide covers running ClawStrike + OpenClaw together in Docker.
+This guide covers running ClawStrike + OpenClaw together in Docker. For installing ClawStrike directly on your host machine, see the [direct setup guide](direct-setup.md).
 
 ## Overview
 
@@ -20,10 +20,10 @@ Choose one:
 
 | Model | Size | Languages | License page |
 |-------|------|-----------|--------------|
-| Llama-Prompt-Guard-2-22M | ~350 MB | English only | https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M |
-| Llama-Prompt-Guard-2-86M | ~1.7 GB | Multilingual | https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M |
+| Llama-Prompt-Guard-2-22M | ~300 MB | English only | [Hugging Face](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-22M) |
+| Llama-Prompt-Guard-2-86M | ~1.13 GB | Multilingual | [Hugging Face](https://huggingface.co/meta-llama/Llama-Prompt-Guard-2-86M) |
 
-After accepting, generate a read-only token at https://huggingface.co/settings/tokens.
+After accepting, generate a read-only token at [huggingface.co/settings/tokens](https://huggingface.co/settings/tokens).
 
 This step cannot be automated. **The `HF_TOKEN` alone is not sufficient — you should also accept the license on the model page.**
 
@@ -130,8 +130,16 @@ Check that:
 
 The entrypoint prints the exact model URLs when warmup fails. OpenClaw still starts — classification requests will return errors until the model is available.
 
+## Verify
 
-## Notes
+Once the gateway is running, open a shell in the container and check that ClawStrike is working:
+
+```bash
+docker compose exec openclaw-gateway clawstrike health
+# {"status": "ok", "mode": "skill", "classifier": "multilingual", "mcp_enabled": false}
+```
+
+## Security & Architecture Notes
 
 - `clawstrike.yaml` is mounted read-only (`:ro`). The container cannot modify the security policy.
 - The gateway binds to `127.0.0.1` on the host by default — reachable from the host machine only, not from the LAN or internet. To expose it to the LAN or a tailnet, add `OPENCLAW_GATEWAY_HOST=0.0.0.0` to `.env`. If you do, generate a strong `OPENCLAW_GATEWAY_TOKEN` (e.g. `openssl rand -hex 32`) and apply additional network controls so port 18789 is not reachable from the internet.
