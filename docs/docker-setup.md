@@ -42,6 +42,8 @@ cp clawstrike.example.yaml clawstrike.yaml   # then edit to taste
 cp .env.example .env
 ```
 
+`clawstrike.yaml` is bind-mounted read-only into the OpenClaw workspace directory inside the container (`/home/node/.openclaw/workspace/clawstrike.yaml`). OpenClaw executes CLI commands from that directory, so the agent finds the config automatically without any extra flags.
+
 Edit `.env` and fill in:
 - `HF_TOKEN` — your Hugging Face read-only token
 - LLM session credentials (`CLAUDE_AI_SESSION_KEY`, etc.) for whichever LLM provider you use
@@ -106,8 +108,9 @@ Pinning is intentional — OpenClaw updates may change the skill API or director
 | Volume | Purpose | Survives rebuild? |
 |--------|---------|-------------------|
 | `hf-cache` | Hugging Face model cache | Yes (named volume) |
-| `clawstrike-data` | Audit DB, contact registry | Yes (named volume) |
+| `clawstrike-data` | Audit DB, contact registry (mounted at `workspace/data`) | Yes (named volume) |
 | `OPENCLAW_CONFIG_DIR` | OpenClaw config, conversations | Yes (host bind-mount) |
+| `./clawstrike.yaml` | Security policy config (read-only bind-mount into workspace) | N/A — host file |
 
 ## Troubleshooting
 
@@ -119,7 +122,7 @@ Pinning is intentional — OpenClaw updates may change the skill API or director
 cp clawstrike.example.yaml clawstrike.yaml
 ```
 
-Then ensure `docker-compose.yml` has the correct bind-mount path (it does by default: `./clawstrike.yaml:/clawstrike/clawstrike.yaml:ro`).
+Then ensure `docker-compose.yml` has the correct bind-mount path (it does by default: `./clawstrike.yaml:/home/node/.openclaw/workspace/clawstrike.yaml:ro`).
 
 ### Model warmup fails
 
@@ -141,7 +144,7 @@ docker compose exec openclaw-gateway clawstrike health
 
 ## Security & Architecture Notes
 
-- `clawstrike.yaml` is mounted read-only (`:ro`). The container cannot modify the security policy.
+- `clawstrike.yaml` is mounted read-only (`:ro`) into the OpenClaw workspace (`/home/node/.openclaw/workspace/clawstrike.yaml`). The container cannot modify the security policy. OpenClaw executes CLI commands from this directory, so the agent finds the config automatically.
 - The gateway binds to `127.0.0.1` on the host by default — reachable from the host machine only, not from the LAN or internet. To expose it to the LAN or a tailnet, add `OPENCLAW_GATEWAY_HOST=0.0.0.0` to `.env`. If you do, generate a strong `OPENCLAW_GATEWAY_TOKEN` (e.g. `openssl rand -hex 32`) and apply additional network controls so port 18789 is not reachable from the internet.
 - The image runs as the non-root `node` user (uid 1000), matching the upstream OpenClaw security posture.
 - PyTorch is installed from the CPU-only index — both Docker and local dev installs use CPU inference. GPU is unnecessary for models of this size (22M / 86M parameters).

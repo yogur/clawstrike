@@ -44,13 +44,16 @@ Make sure you have accepted Meta's license on the model page before proceeding �
 
 ## Step 3 — Configure ClawStrike
 
-Bootstrap a config file with secure defaults:
+OpenClaw executes shell commands from within its workspace directory (`~/.openclaw/workspace` by default). ClawStrike's CLI looks for `clawstrike.yaml` in the current working directory, so the config must live in the workspace for the agent to find it automatically.
+
+Bootstrap a config file with secure defaults directly in the workspace:
 
 ```bash
+cd ~/.openclaw/workspace
 clawstrike init
 ```
 
-This creates `clawstrike.yaml` in the current directory with `600` permissions (owner read/write only) and a `data/` directory with `700` permissions for the audit database.
+This creates `clawstrike.yaml` in `~/.openclaw/workspace/` with `600` permissions (owner read/write only) and a `data/` directory with `700` permissions for the audit database.
 
 For agents that use CLI integration (like OpenClaw), the default config sets `mcp.enabled: false`, which is correct — no MCP server is needed. If your agent connects via MCP instead, run `clawstrike init --mcp`, or set `mcp.enabled: true` in the config.
 
@@ -78,9 +81,10 @@ The skill file instructs the agent to call ClawStrike's `classify` and `gate` to
 
 ## Step 5 — Verify
 
-Check that ClawStrike can load its config:
+Check that ClawStrike can load its config (run from `~/.openclaw/workspace`):
 
 ```bash
+cd ~/.openclaw/workspace
 clawstrike health
 # {"status": "ok", "mode": "skill", "classifier": "multilingual", "mcp_enabled": false}
 ```
@@ -116,12 +120,12 @@ The first call for any `source_id` returns `is_first_contact: true` with `untrus
 
 When running ClawStrike alongside an AI agent, the agent has shell access by design — that's how it calls `clawstrike classify` and `clawstrike gate`. This means the agent *could* also read or modify ClawStrike's files if permissions allow it. A few measures to limit this:
 
-**Protect the config file.** `clawstrike.yaml` controls the security policy. If the agent can modify it, a prompt injection could weaken thresholds, add trusted contacts, or disable gating. `clawstrike init` sets `600` permissions by default. If you run the agent under a separate user account, ensure that account has read access but not write access to the config:
+**Protect the config file.** `clawstrike.yaml` controls the security policy. If the agent can modify it, a prompt injection could weaken thresholds, add trusted contacts, or disable gating. `clawstrike init` sets `600` permissions by default. The config lives in `~/.openclaw/workspace/clawstrike.yaml` — because the agent has shell access to its own workspace, file permissions are your primary protection. If you run the agent under a separate user account, ensure that account has read access but not write access to the config:
 
 ```bash
 # Config owned by admin, readable by agent's group
-chown admin:openclaw-svc clawstrike.yaml
-chmod 640 clawstrike.yaml
+chown admin:openclaw-svc ~/.openclaw/workspace/clawstrike.yaml
+chmod 640 ~/.openclaw/workspace/clawstrike.yaml
 ```
 
 **Keep allowlist learning off.** The default `allowlist_learning: false` means the agent cannot create persistent "always allow" rules, even if a prompt injection tries to use the `confirm` tool with `always_allow`. Enable it only if you need dynamic rule creation and understand the risk.

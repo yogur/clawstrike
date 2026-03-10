@@ -121,7 +121,8 @@ pip install clawstrike --extra-index-url https://download.pytorch.org/whl/cpu
 pip install huggingface_hub[cli]
 hf auth login --token $HF_TOKEN --add-to-git-credential
 
-# Bootstrap config with secure defaults
+# Bootstrap config in the OpenClaw workspace (where OpenClaw runs CLI commands)
+cd ~/.openclaw/workspace
 clawstrike init
 
 # Copy the ClawStrike skill into your OpenClaw skills directory

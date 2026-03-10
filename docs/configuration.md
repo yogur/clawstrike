@@ -14,6 +14,14 @@ clawstrike init --force        # overwrite an existing config
 
 The generated file has `600` permissions (owner read/write only). See [clawstrike.example.yaml](../clawstrike.example.yaml) for a fully annotated version.
 
+**Where to put the config file:**
+
+OpenClaw executes CLI commands (`clawstrike classify`, `clawstrike gate`, etc.) from within its workspace directory. ClawStrike's CLI looks for `clawstrike.yaml` in the current working directory by default, so the config must live there for the agent to find it automatically.
+
+- **Direct install:** run `clawstrike init` from inside `~/.openclaw/workspace/` (or your configured workspace path).
+- **Docker:** `clawstrike.yaml` is bind-mounted read-only into `/home/node/.openclaw/workspace/clawstrike.yaml` automatically — no manual placement needed.
+- **Override:** pass `--config /path/to/clawstrike.yaml` to any CLI command to use a config at an arbitrary path.
+
 **File structure:**
 
 All settings live under a top-level `clawstrike:` key:

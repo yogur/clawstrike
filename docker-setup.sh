@@ -70,7 +70,11 @@ if [[ ! -f "$ROOT_DIR/clawstrike.yaml" ]]; then
   fail "clawstrike.yaml not found. Create one first:
     cp clawstrike.example.yaml clawstrike.yaml   # then edit to taste
     # OR (if uv is installed locally):
-    uv run clawstrike init"
+    uv run clawstrike init
+
+  Note: docker-compose.yml mounts this file read-only into the OpenClaw
+  workspace inside the container so OpenClaw can find it when invoking
+  ClawStrike CLI commands."
 fi
 
 # ── Data directories ───────────────────────────────────────────────────────────

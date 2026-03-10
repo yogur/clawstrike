@@ -14,17 +14,20 @@ services:
       CLAUDE_WEB_COOKIE: ${CLAUDE_WEB_COOKIE:-}
       # ClawStrike
       HF_TOKEN: ${HF_TOKEN}
-      CLAWSTRIKE_CONFIG: /clawstrike/clawstrike.yaml
+      CLAWSTRIKE_CONFIG: /home/node/.openclaw/workspace/clawstrike.yaml
     volumes:
       # OpenClaw data (host bind-mount — must be created by user)
       - ${OPENCLAW_CONFIG_DIR}:/home/node/.openclaw
       - ${OPENCLAW_WORKSPACE_DIR}:/home/node/.openclaw/workspace
-      # ClawStrike config (read-only — container cannot modify security policy)
-      - ./clawstrike.yaml:/clawstrike/clawstrike.yaml:ro
+      # ClawStrike config — mounted into the workspace so OpenClaw can find it
+      # by default when executing CLI commands from that directory (read-only —
+      # container cannot modify security policy)
+      - ./clawstrike.yaml:/home/node/.openclaw/workspace/clawstrike.yaml:ro
       # HF model cache (named volume — persists across restarts and rebuilds)
       - hf-cache:/home/node/.cache/huggingface
-      # ClawStrike runtime data: audit DB, contact registry
-      - clawstrike-data:/clawstrike/data
+      # ClawStrike runtime data: audit DB, contact registry — mounted at
+      # workspace/data so the default ./data/audit.db path resolves correctly
+      - clawstrike-data:/home/node/.openclaw/workspace/data
     ports:
       - "${OPENCLAW_GATEWAY_HOST:-127.0.0.1}:${OPENCLAW_GATEWAY_PORT:-18789}:18789"
       - "${OPENCLAW_GATEWAY_HOST:-127.0.0.1}:${OPENCLAW_BRIDGE_PORT:-18790}:18790"
